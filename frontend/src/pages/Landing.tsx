@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 const features = [
   {
     title: 'Data warehouse',
-    body: 'Star schema, ETL pipeline and verified KPIs built on the Olist Brazilian E-Commerce dataset.',
+    body: 'Upload structured datasets and explore verified metrics. The existing Olist reference warehouse is available alongside your datasets.',
   },
   {
     title: 'ML models',
@@ -24,8 +24,8 @@ export default function Landing() {
             AI-Powered Business Intelligence &amp; Predictive Analytics Platform
           </h1>
           <p className="text-neutral-400 mt-4">
-            Semester 5 project integrating AI, Data Warehousing &amp; Mining, and Software Engineering. Uses
-            Olist Brazilian E-Commerce dataset.
+            Semester 5 project integrating AI, Data Warehousing &amp; Mining, and Software Engineering.
+            Analyze your uploaded datasets or explore the Olist reference.
           </p>
           <Link
             to="/login"
@@ -34,7 +34,7 @@ export default function Landing() {
             Sign in to open the dashboard
           </Link>
           <p className="text-xs text-neutral-500 mt-4">
-            Demo accounts: <span className="text-neutral-400">admin / admin123</span> (business
+            Local development accounts: <span className="text-neutral-400">admin / admin123</span> (business
             intelligence + platform administration) ·{' '}
             <span className="text-neutral-400">analyst / analyst123</span> (business intelligence)
           </p>
@@ -50,7 +50,7 @@ export default function Landing() {
         </section>
 
         <p className="text-center text-xs text-neutral-500 mt-16">
-          Status: complete — warehouse, ML models and AI assistant are integrated and running.
+          Analytics, reports and AI insights follow your active dataset. Existing trained ML models run when their input requirements are satisfied.
         </p>
       </div>
     </div>

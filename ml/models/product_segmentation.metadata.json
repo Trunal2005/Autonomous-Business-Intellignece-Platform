@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "target": "cluster_label",
   "algorithm": "KMeans (product engagement, standardized)",
-  "trained_at": "2026-10-03T12:52:11.460945+00:00",
+  "trained_at": "2026-10-06T16:39:18.550152+00:00",
   "dataset_fingerprint": "1fcb5f3e0c7e497e",
   "features_schema": [
     "qty_log",
@@ -52,5 +52,30 @@
   },
   "status": "available",
   "artifact": "product_segmentation.joblib",
-  "notes": "log1p transforms on qty/revenue; k selected by sampled silhouette."
+  "notes": "log1p transforms on qty/revenue; k selected by sampled silhouette.",
+  "contract": {
+    "required_semantics": [
+      "product",
+      "quantity",
+      "revenue",
+      "price",
+      "weight_g"
+    ],
+    "optional_semantics": [],
+    "training_domain": "Brazilian e-commerce",
+    "currency_code": "BRL",
+    "expected_types": {
+      "product": "entity",
+      "quantity": "numeric",
+      "revenue": "numeric",
+      "price": "numeric",
+      "weight_g": "numeric"
+    },
+    "minimum_observations": 1,
+    "frequency": null,
+    "transformations": "log1p(quantity),log1p(revenue),price,weight in grams; saved scaler",
+    "supported_filters": "shared dataset filters before feature aggregation",
+    "output_type": "product clusters",
+    "automatically_retrained": false
+  }
 }

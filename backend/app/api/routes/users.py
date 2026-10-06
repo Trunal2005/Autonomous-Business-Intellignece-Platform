@@ -16,6 +16,16 @@ class RoleChange(BaseModel):
     role: str = Field(..., pattern="^(analyst|admin)$")
 
 
+class CreateUser(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=128)
+    role: str = Field(..., pattern="^(analyst|admin)$")
+
+
+class UserStatus(BaseModel):
+    is_active: bool
+
+
 @router.get("/me")
 def read_me(user: dict = Depends(get_current_user)):
     return {"user": user}
@@ -48,3 +58,65 @@ def set_role(username: str, payload: RoleChange, _: dict = Depends(require_roles
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return {"user": updated}
+
+
+@router.post("")
+def create_new_user(payload: CreateUser, _: dict = Depends(require_roles("admin"))):
+    try:
+        user = user_service.create_user(payload.username, payload.password, payload.role)
+        return {"user": user}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.patch("/{username}/status")
+def set_status(username: str, payload: UserStatus, _: dict = Depends(require_roles("admin"))):
+    try:
+        updated = user_service.update_status(username, payload.is_active)
+    except user_service.LastAdminError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return {"user": updated}
+
+
+@router.get("/roles/metadata")
+def list_roles(_: dict = Depends(require_roles("admin"))):
+    return {
+        "roles": [
+            {
+                "name": "admin",
+                "description": "Full administrative access including user, system, ETL, warehouse, ML administration and settings.",
+                "permissions": {
+                    "Dashboard": True,
+                    "Analytics": True,
+                    "ML Analysis": True,
+                    "Reports": True,
+                    "User Management": True,
+                    "Role Management": True,
+                    "System Health": True,
+                    "ETL/Data": True,
+                    "Warehouse": True,
+                    "ML Admin": True,
+                    "Settings": True,
+                }
+            },
+            {
+                "name": "analyst",
+                "description": "Business intelligence, analytics, ML analysis and reporting access.",
+                "permissions": {
+                    "Dashboard": True,
+                    "Analytics": True,
+                    "ML Analysis": True,
+                    "Reports": True,
+                    "User Management": False,
+                    "Role Management": False,
+                    "System Health": False,
+                    "ETL/Data": False,
+                    "Warehouse": False,
+                    "ML Admin": False,
+                    "Settings": False,
+                }
+            }
+        ]
+    }

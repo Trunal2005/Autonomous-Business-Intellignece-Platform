@@ -1,6 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
+from app.analytics.filters import Filters, analytics_filters
+from app.database.deps import get_db
 from app.services import ml as ml_service
 
 router = APIRouter()
@@ -16,41 +19,65 @@ class SalesPredictRequest(BaseModel):
 
 
 @router.get("/status")
-def ml_status():
-    return {"features": ml_service.feature_status()}
+def ml_status(db=Depends(get_db), f=Depends(analytics_filters)):
+    features = ml_service.feature_status()
+    for feature in features:
+        for model in feature["models"]:
+            model["compatibility"] = ml_service.compatibility(model["name"], db, f)
+            model["metrics_scope"] = "Offline training/evaluation on Olist; not an evaluation of the selected dataset."
+    return {"features": features, "dataset_id": db.info["dataset"].id}
 
 
 @router.get("/models/{name}")
-def ml_model_detail(name: str):
+def ml_model_detail(name: str, db=Depends(get_db), f=Depends(analytics_filters)):
     meta = ml_service.load_all_metadata().get(name)
     if not meta:
         raise HTTPException(status_code=404, detail=f"model '{name}' not found")
-    return meta
+    return {**meta, "compatibility": ml_service.compatibility(name, db, f)}
+
+
+def _infer(name, db, f, function):
+    check = ml_service.compatibility(name, db, f)
+    if not check["compatible"]:
+        return {"status": "not_applicable", "reason": " ".join(check["reasons"]), "compatibility": check,
+                "dataset_id": db.info["dataset"].id}
+    try:
+        result = function()
+        ml_service.validate_output(result)
+        return {**result, "status": "available", "compatibility": check, "dataset_id": db.info["dataset"].id}
+    except FileNotFoundError:
+        raise HTTPException(503, "The trained model artifact is unavailable. Contact the administrator.") from None
+    except (ValueError, KeyError, IndexError):
+        raise HTTPException(422, "Model inference could not produce valid output for this dataset and filter selection.") from None
 
 
 @router.get("/forecast")
-def ml_forecast(periods: int = 30):
+def ml_forecast(periods: int = 30, target: str = "orders", db=Depends(get_db), f=Depends(analytics_filters)):
     if not (1 <= periods <= 90):
         raise HTTPException(status_code=400, detail="periods must be between 1 and 90")
-    try:
-        return ml_service.forecast(periods)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if target not in ("orders", "revenue"):
+        raise HTTPException(status_code=400, detail="target must be orders or revenue")
+    return _infer(f"sales_forecast_{target}", db, f, lambda: ml_service.forecast(periods, target, db, f))
 
 
 @router.get("/segments/customers")
-def ml_customer_segments():
-    return ml_service.customer_segments()
+def ml_customer_segments(db=Depends(get_db), f=Depends(analytics_filters)):
+    return _infer("customer_segmentation", db, f, lambda: ml_service.customer_segments(db, f))
 
 
 @router.get("/anomalies")
-def ml_anomalies():
-    return ml_service.anomalies()
+def ml_anomalies(db=Depends(get_db), f=Depends(analytics_filters)):
+    return _infer("anomaly_detection", db, f, lambda: ml_service.anomalies(db, f))
 
 
 @router.post("/predict/sales")
-def ml_predict_sales(payload: SalesPredictRequest):
-    try:
-        return ml_service.predict_sales(payload.model_dump())
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+def ml_predict_sales(payload: SalesPredictRequest, db=Depends(get_db), f=Depends(analytics_filters)):
+    return _infer("sales_prediction", db, f, lambda: ml_service.predict_sales(payload.model_dump()))
+
+
+@router.get("/product-segmentation")
+def ml_product_segmentation(
+    f=Depends(analytics_filters),
+    db=Depends(get_db)
+):
+    return _infer("product_segmentation", db, f, lambda: ml_service.product_segments(db, f))

@@ -39,7 +39,7 @@ export default function AdminData() {
             ))}
           </tbody>
         </table>
-        <div className="text-xs text-neutral-500 mt-3">Source dataset: {etl.olist_dir}</div>
+        <div className="text-xs text-neutral-500 mt-3">Reference warehouse source: {etl.olist_dir}</div>
       </div>
 
       <div className="bg-neutral-900/60 border border-neutral-800 rounded-lg p-4 text-sm text-neutral-500">

@@ -16,9 +16,10 @@ def get_optional_user(token: str | None = Depends(oauth2_scheme)) -> dict | None
     if not token:
         return None
     payload = decode_token(token)
-    if not payload:
+    if not payload or payload.get("type") != "access":
         return None
-    return user_service.get_user(payload.get("sub", ""))
+    user = user_service.get_user(payload.get("sub", ""))
+    return user if user and user.get("is_active") else None
 
 
 def get_current_user(user: dict | None = Depends(get_optional_user)) -> dict:

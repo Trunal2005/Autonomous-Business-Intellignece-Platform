@@ -38,8 +38,9 @@
 - API (under `/api/ml`):
   - `GET /status` — per-feature real status + metrics
   - `GET /models/{name}` — full metadata
-  - `GET /forecast?periods=N` — recursive daily order forecast
-  - `GET /segments/customers` — cluster summary
+  - `GET /forecast?periods=N&target=[orders|revenue]` — recursive daily order or revenue forecast
+  - `GET /segments/customers` — customer cluster summary
+  - `GET /product-segmentation` — filter-aware on-the-fly product clustering
   - `GET /anomalies` — anomaly metrics
   - `POST /predict/sales` — order item revenue prediction
 

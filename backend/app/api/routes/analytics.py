@@ -45,7 +45,7 @@ def overview(
     """Dashboard payload: KPIs, series and distributions in one request."""
     view = metrics.overview(db, f)
     if grain:
-        view["revenue_series"] = metrics.time_series(db, f, _grain(grain))
+        view["time_series" if "metric_cards" in view else "revenue_series"] = metrics.time_series(db, f, _grain(grain))
     return view
 
 
@@ -57,7 +57,7 @@ def sales(
 ):
     view = metrics.sales(db, f)
     if grain:
-        view["revenue_series"] = metrics.time_series(db, f, _grain(grain))
+        view["time_series" if "metric_cards" in view else "revenue_series"] = metrics.time_series(db, f, _grain(grain))
     return view
 
 
@@ -69,8 +69,12 @@ def orders(
 ):
     view = metrics.orders(db, f)
     if grain:
-        view["orders_series"] = metrics.time_series(db, f, _grain(grain))
-        view["status_over_time"] = metrics.status_over_time(db, f, _grain(grain))
+        _grain(grain)
+        if "metric_cards" in view:
+            view["time_series"] = metrics.time_series(db, f, grain)
+        else:
+            view["orders_series"] = metrics.time_series(db, f, grain)
+            view["status_over_time"] = metrics.status_over_time(db, f, grain)
     return view
 
 
@@ -92,7 +96,11 @@ def sellers(
 ):
     view = metrics.sellers(db, f)
     if grain:
-        view["top_sellers_series"] = metrics.top_sellers_series(db, f, grain=_grain(grain))
+        _grain(grain)
+        if "metric_cards" in view:
+            view["time_series"] = metrics.time_series(db, f, grain)
+        else:
+            view["top_sellers_series"] = metrics.top_sellers_series(db, f, grain=grain)
     return view
 
 

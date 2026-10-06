@@ -2,7 +2,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.deps import auth_gate, require_bi_user, require_admin
-from app.api.routes import dashboard, ml, insights, analytics, auth, users, reports, admin
+from app.api.routes import dashboard, ml, insights, analytics, auth, users, reports, admin, datasets
 
 app = FastAPI(title="Sem5 BI Platform", version="0.1.0")
 
@@ -17,7 +17,7 @@ app.add_middleware(
 _protected = [Depends(auth_gate)]
 
 # Business intelligence routers: admin + analyst (anonymous -> 401).
-_bi = [Depends(auth_gate), Depends(require_bi_user)]
+_bi = [Depends(auth_gate), Depends(require_bi_user), Depends(datasets.dataset_context)]
 # Platform administration routers: admin only (analyst -> 403).
 _admin = [Depends(auth_gate), Depends(require_admin)]
 
@@ -29,6 +29,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"], dependencies=_protected)
 app.include_router(reports.router, prefix="/api/reports", tags=["reports"], dependencies=_bi)
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"], dependencies=_admin)
+app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"], dependencies=[Depends(auth_gate), Depends(require_bi_user)])
 
 @app.get("/health")
 def health():

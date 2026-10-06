@@ -6,6 +6,7 @@ from app.ai_assistant import context as ctx
 from app.ai_assistant.provider import ProviderFactory, provider_status
 from app.api.deps import get_current_user
 from app.database.deps import get_db
+from app.analytics.filters import Filters, analytics_filters
 
 router = APIRouter()
 
@@ -23,6 +24,7 @@ def insights_status():
 @router.post("/query")
 def insights_query(
     payload: QueryRequest,
+    f: Filters = Depends(analytics_filters),
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -30,12 +32,13 @@ def insights_query(
     # Administrative data is never exposed to the assistant.
     role = user.get("role", "analyst")
 
-    try:
-        context = ctx.build_context(db, role)
-        sources = ["warehouse.kpis", "warehouse.monthly_revenue", "warehouse.categories", "ml.status"]
-    except Exception:
-        context = {"note": "warehouse not loaded; run ETL for full context"}
-        sources = []
+    context = ctx.build_context(db, role, f)
+    sources = [f"dataset:{context['dataset_id']}:aggregates"]
+
+    grounded = ctx.grouped_answer(payload.question, db, f) or ctx.numerical_answer(payload.question, context)
+    if grounded:
+        return {"answer": grounded, "sources": sources, "status": "available", "provider": "computed",
+                "role": role, "dataset_id": context["dataset_id"]}
 
     provider = ProviderFactory.get_provider()
     prompt = ctx.build_prompt(payload.question, context)
@@ -52,4 +55,5 @@ def insights_query(
         "status": status,
         "provider": result.get("provider"),
         "role": role,
+        "dataset_id": context["dataset_id"],
     }

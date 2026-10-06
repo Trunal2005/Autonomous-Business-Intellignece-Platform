@@ -132,3 +132,18 @@
 
 
 
+
+## Phase 13 — Priority 2 Analytics
+- [x] 13.1 Analytics Layout and Routing (6 BI sections)
+- [x] 13.2 FilterBar implementation and shared useFilters hook
+- [x] 13.3 Filter-aware backend metric layer (metrics.py)
+- [x] 13.4 Cross-endpoint metric reconciliation and median SQL fixes
+- [x] 13.5 UI pages: Sales, Orders, Customers, Products, Sellers, Delivery
+
+## Phase 14 — Priority 3 ML Integration
+- [x] 14.1 Backend Product Segmentation API (/api/ml/product-segmentation) with dynamic K-Means inference
+- [x] 14.2 Frontend Product Segmentation UI with filter-aware clustering
+- [x] 14.3 Backend Revenue Forecast API support (/api/ml/forecast?target=revenue)
+- [x] 14.4 Frontend Revenue Forecast UI with horizon selection
+- [x] 14.5 Dedicated ML Metrics section (/ml/metrics) with honest model availability and artifact evaluation metadata
+- [x] 14.6 ML Documentation updated to reflect current state

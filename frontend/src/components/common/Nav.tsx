@@ -1,10 +1,10 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { getStoredUser, isAdmin, logout } from '@/services/auth'
 
 const BI_LINKS = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/analytics', label: 'Analytics' },
-  { to: '/models', label: 'ML Models' },
+  { to: '/ml', label: 'Machine Learning' },
   { to: '/insights', label: 'AI Insights' },
   { to: '/reports', label: 'Reports' },
 ]
@@ -21,6 +21,7 @@ const ADMIN_LINKS = [
 export default function Nav() {
   const user = getStoredUser()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const signOut = () => {
     logout()
@@ -32,7 +33,7 @@ export default function Nav() {
       <div className="flex items-center gap-4">
         <span className="text-[11px] uppercase tracking-wide text-neutral-600">BI</span>
         {BI_LINKS.map((l) => (
-          <Link key={l.to} to={l.to}>
+          <Link key={l.to} to={l.to + location.search}>
             {l.label}
           </Link>
         ))}

@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
+import FilterRedirect from '@/components/FilterRedirect'
 import Landing from '@/pages/Landing'
 import AppLayout from '@/components/layout/AppLayout'
 import RequireAuth from '@/components/RequireAuth'
@@ -18,17 +19,51 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
         children: [
           // ---- Business intelligence (admin + analyst) ----
+          { path: '/datasets', lazy: async () => ({ Component: (await import('@/pages/Datasets')).default }) },
           {
             path: '/dashboard',
             lazy: async () => ({ Component: (await import('@/pages/Dashboard')).default }),
           },
           {
             path: '/analytics',
-            lazy: async () => ({ Component: (await import('@/pages/Analytics')).default }),
+            lazy: async () => ({ Component: (await import('@/pages/analytics/AnalyticsLayout')).default }),
+            children: [
+              { path: '', element: <FilterRedirect to="sales" /> },
+              {
+                path: 'sales',
+                lazy: async () => ({ Component: (await import('@/pages/analytics/Sales')).default }),
+              },
+              {
+                path: 'orders',
+                lazy: async () => ({ Component: (await import('@/pages/analytics/Orders')).default }),
+              },
+              {
+                path: 'customers',
+                lazy: async () => ({ Component: (await import('@/pages/analytics/Customers')).default }),
+              },
+              {
+                path: 'products',
+                lazy: async () => ({ Component: (await import('@/pages/analytics/Products')).default }),
+              },
+              {
+                path: 'sellers',
+                lazy: async () => ({ Component: (await import('@/pages/analytics/Sellers')).default }),
+              },
+              {
+                path: 'delivery',
+                lazy: async () => ({ Component: (await import('@/pages/analytics/Delivery')).default }),
+              },
+            ],
           },
           {
-            path: '/models',
-            lazy: async () => ({ Component: (await import('@/pages/Models')).default }),
+            path: '/ml',
+            lazy: async () => ({ Component: (await import('@/pages/ml/MlLayout')).default }),
+            children: [
+              { path: '', element: <FilterRedirect to="metrics" /> },
+              { path: 'metrics', lazy: async () => ({ Component: (await import('@/pages/ml/MlMetrics')).default }) },
+              { path: 'product-segmentation', lazy: async () => ({ Component: (await import('@/pages/ml/ProductSegmentation')).default }) },
+              { path: 'revenue-forecast', lazy: async () => ({ Component: (await import('@/pages/ml/RevenueForecast')).default }) },
+            ],
           },
           {
             path: '/reports',
@@ -53,6 +88,12 @@ export const router = createBrowserRouter([
                     path: '/admin/users',
                     lazy: async () => ({
                       Component: (await import('@/pages/admin/AdminUsers')).default,
+                    }),
+                  },
+                  {
+                    path: '/admin/roles',
+                    lazy: async () => ({
+                      Component: (await import('@/pages/admin/AdminRoles')).default,
                     }),
                   },
                   {

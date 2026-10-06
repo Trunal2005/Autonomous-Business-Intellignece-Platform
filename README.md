@@ -1,12 +1,25 @@
 ﻿# AI-Powered Business Intelligence and Predictive Analytics Platform (sem-5)
 
 Semester 5 academic project: AI, Data Warehousing & Mining, and Software
-Engineering integrated into one working platform. Uses the Olist Brazilian
-E-Commerce dataset.
+Engineering integrated into one working platform. Supports private uploaded
+structured datasets alongside the Olist Brazilian E-Commerce reference.
+
+## Dataset workflow
+
+Sign in, open **Dataset Manager**, upload CSV, a single-sheet XLSX/XLS workbook,
+or a JSON array of flat records, then select a READY dataset in the header.
+Dashboard, analytics, filters, reports, ML compatibility and AI context follow
+that selection. Existing trained models are reused when compatible; uploads do
+not trigger retraining. Incompatible data receives a reasoned Not Applicable
+result without fabricated predictions.
+
+See [Universal datasets](docs/UNIVERSAL_DATASETS.md) for limits, semantic
+corrections, isolation, model requirements and supported structures, and
+[verification report](docs/UNIVERSAL_DATASET_REPORT.md) for actual test results.
 
 ## Quick Status â€” complete
-- Local repo: `%USERPROFILE%\Downloads\sem-5`
-- Dataset: `%USERPROFILE%\Downloads\olist` (9 CSVs, never committed)
+- Dataset support: private uploads plus the optional Olist reference warehouse.
+- Reference source: `%USERPROFILE%\Downloads\olist` (9 CSVs, never committed).
 - Tools: git, node, python, pip, docker. `gh` CLI intentionally not used.
 - Phase: all master-prompt phases done (see `docs/CHECKLIST.md`); live status in
   `docs/STATUS.md`.
@@ -20,22 +33,23 @@ E-Commerce dataset.
 - AI: provider-agnostic LLM (Ollama preferred) with deterministic fallback
 
 ## Setup (local)
-1. Ensure the dataset is at `%USERPROFILE%\Downloads\olist`.
+1. For the optional reference warehouse, place Olist at `%USERPROFILE%\Downloads\olist`.
 2. Copy `.env.example` to `.env` (optional; sensible dev defaults exist).
 3. Frontend: `cd frontend && npm install`
 4. Backend: `cd backend && pip install -r requirements.txt`
 5. ML: `cd ml && pip install -r requirements.txt`
-6. Build the warehouse: `cd backend && python -m app.services.etl`
-7. Train the models: `cd ml && python run_all.py`
+6. Optional reference warehouse: `cd backend && python -m app.services.etl`
+7. Use existing local saved models. To explicitly train the reference models when
+   artifacts are absent: `cd ml && python run_all.py`. Uploads never train models.
 8. Run the API: `cd backend && python -m uvicorn app.main:app --reload`
 9. Run the UI: `cd frontend && npm run dev`
 
 ## Testing
 ```powershell
-cd backend; python -m pytest -q          # 50 API tests (incl. RBAC matrix)
+cd backend; python -m pytest -q          # 95 API/integration tests with loaded reference
 cd ml;      python -m pytest -q          # 8 pipeline tests
-cd frontend; npm test                    # 15 component tests (Vitest)
-cd frontend; npm run e2e                 # 5 browser E2E (Playwright)
+cd frontend; npm test                    # 28 component/API tests (Vitest)
+cd frontend; npm run e2e                 # 6 real browser E2E (Playwright)
 cd frontend; npm run lint; npm run build
 ```
 

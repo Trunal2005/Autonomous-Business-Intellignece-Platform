@@ -1,27 +1,27 @@
 import { useState } from 'react'
 import { downloadReport } from '@/services/api'
 import { getStoredUser } from '@/services/auth'
+import { useFilters } from '@/hooks/useFilters'
+import FilterBar from '@/components/FilterBar'
 
 const REPORTS = [
   { name: 'kpis', label: 'KPIs', minRole: 'Both roles' },
   { name: 'orders_by_status', label: 'Orders by Status', minRole: 'Both roles' },
   { name: 'monthly_revenue', label: 'Monthly Revenue', minRole: 'Both roles' },
   { name: 'revenue_by_category', label: 'Revenue by Category', minRole: 'Both roles' },
+  { name: 'numeric_statistics', label: 'Numeric Statistics', minRole: 'Both roles' },
+  { name: 'dataset_rows', label: 'Dataset Rows', minRole: 'Both roles' },
 ]
 
 export default function Reports() {
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const { filters } = useFilters()
   const [error, setError] = useState<string | null>(null)
   const user = getStoredUser()
 
   const run = async (report: string) => {
     setError(null)
     try {
-      const params: Record<string, string> = {}
-      if (dateFrom) params.date_from = dateFrom
-      if (dateTo) params.date_to = dateTo
-      await downloadReport(report, params)
+      await downloadReport(report, filters)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Export failed')
     }
@@ -37,26 +37,7 @@ export default function Reports() {
       </div>
 
       <div className="bg-neutral-900/60 border border-neutral-800 rounded-lg p-4 space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-          <label className="flex flex-col gap-1">
-            Date from (optional)
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="bg-neutral-800 rounded px-3 py-1.5"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            Date to (optional)
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="bg-neutral-800 rounded px-3 py-1.5"
-            />
-          </label>
-        </div>
+        <FilterBar />
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {REPORTS.map((r) => (

@@ -5,13 +5,15 @@ derives its numbers from these functions, so the same metric always reconciles
 across pages for the same filter context (see docs/ANALYTICS.md).
 
 Rules:
-- All values come from the loaded Olist warehouse; nothing is fabricated.
+- All values come from the authorized selected dataset; nothing is fabricated.
 - Aggregation happens in SQL (SUM/COUNT/AVG/GROUP BY) - rows are never loaded
   into Python for computation.
 - Every dynamic value is bound as a SQL parameter.
 """
 
 from __future__ import annotations
+
+from app.analytics.tabular import dataset_metric
 
 from typing import Optional
 
@@ -83,6 +85,7 @@ def _state_clause(f: Filters) -> tuple[str, dict]:
 # ---------------------------------------------------------------------------
 
 
+@dataset_metric
 def kpis(db: Session, f: Filters) -> dict:
     """Headline metrics for the current filter context."""
     where, params = order_where(f)
@@ -116,6 +119,8 @@ def kpis(db: Session, f: Filters) -> dict:
         f"""
         SELECT
             COUNT(*) AS items_sold,
+            COALESCE(SUM(i.price), 0) AS total_revenue,
+            COALESCE(SUM(i.freight_value), 0) AS total_freight,
             COUNT(DISTINCT i.product_id) AS products_sold,
             COUNT(DISTINCT i.seller_id) AS active_sellers
         FROM {item_from(f)}
@@ -162,20 +167,20 @@ def kpis(db: Session, f: Filters) -> dict:
     new = _one(db, new_sql, new_params)
 
     total_orders = int(row["total_orders"] or 0)
-    total_revenue = float(row["total_revenue"] or 0.0)
+    total_revenue = float(items["total_revenue"] or 0.0)
     with_estimate = int(row["orders_with_estimate"] or 0)
     late = int(row["late_orders"] or 0)
     on_time_rate = _pct(with_estimate - late, with_estimate) if with_estimate else None
 
     median_sql, median_params = median_expr(
-        db, "o.delivery_days", where, from_sql=order_from(f)
+        db, "o.delivery_days", where, from_sql=order_from(f), params=params
     )
     median_days = db.execute(text(median_sql), median_params).scalar()
 
     return {
         "total_orders": total_orders,
         "total_revenue": round(total_revenue, 2),
-        "total_freight": round(float(row["total_freight"] or 0.0), 2),
+        "total_freight": round(float(items["total_freight"] or 0.0), 2),
         "avg_order_value": round(total_revenue / total_orders, 2) if total_orders else 0.0,
         "unique_customers": int(row["unique_customers"] or 0),
         "new_customers": int(new["new_customers"] or 0),
@@ -205,6 +210,7 @@ def kpis(db: Session, f: Filters) -> dict:
 # ---------------------------------------------------------------------------
 
 
+@dataset_metric
 def time_series(db: Session, f: Filters, grain: str = "month", limit: int = 400) -> list[dict]:
     """Orders/customers (order grain) + revenue (item grain) per period.
 
@@ -262,6 +268,7 @@ def time_series(db: Session, f: Filters, grain: str = "month", limit: int = 400)
 # ---------------------------------------------------------------------------
 
 
+@dataset_metric
 def revenue_by_category(db: Session, f: Filters, limit: int = 20) -> list[dict]:
     where, params = item_where(f)
     rows = _rows(
@@ -315,6 +322,7 @@ def revenue_by_state(db: Session, f: Filters, dimension: str = "customer", limit
     return _with_share(rows, "revenue", _revenue_total(db, f))
 
 
+@dataset_metric
 def orders_by_status(db: Session, f: Filters) -> list[dict]:
     where, params = order_where(f)
     rows = _rows(
@@ -336,6 +344,7 @@ def orders_by_status(db: Session, f: Filters) -> list[dict]:
     return rows
 
 
+@dataset_metric
 def status_over_time(db: Session, f: Filters, grain: str = "month", limit: int = 120) -> list[dict]:
     where, params = order_where(f)
     return _rows(
@@ -766,6 +775,7 @@ def sellers_by_state(db: Session, f: Filters, limit: int = 30) -> list[dict]:
     return _with_share(rows, "revenue", _revenue_total(db, f))
 
 
+@dataset_metric
 def top_sellers_series(db: Session, f: Filters, top_n: int = 5, grain: str = "month", limit: int = 400) -> list[dict]:
     """Monthly revenue of the current top-N sellers (sample-limited series)."""
     where, params = item_where(f)
@@ -842,7 +852,7 @@ def delivery_metrics(db: Session, f: Filters) -> dict:
     )
 
     median_sql, median_params = median_expr(
-        db, "o.delivery_days", scope, from_sql=order_from(f)
+        db, "o.delivery_days", scope, from_sql=order_from(f), params=params
     )
     median_days = db.execute(text(median_sql), median_params).scalar()
 
@@ -995,6 +1005,7 @@ def delivery_metrics(db: Session, f: Filters) -> dict:
 # ---------------------------------------------------------------------------
 
 
+@dataset_metric
 def sales(db: Session, f: Filters) -> dict:
     k = kpis(db, f)
     categories = revenue_by_category(db, f)
@@ -1012,6 +1023,7 @@ def sales(db: Session, f: Filters) -> dict:
     }
 
 
+@dataset_metric
 def orders(db: Session, f: Filters) -> dict:
     return {
         "kpis": kpis(db, f),
@@ -1025,6 +1037,7 @@ def orders(db: Session, f: Filters) -> dict:
     }
 
 
+@dataset_metric
 def customers(db: Session, f: Filters) -> dict:
     k = kpis(db, f)
     unique = k["unique_customers"]
@@ -1048,6 +1061,7 @@ def customers(db: Session, f: Filters) -> dict:
     }
 
 
+@dataset_metric
 def products(db: Session, f: Filters) -> dict:
     k = kpis(db, f)
     category_rows = products_by_category(db, f)
@@ -1069,6 +1083,7 @@ def products(db: Session, f: Filters) -> dict:
     }
 
 
+@dataset_metric
 def sellers(db: Session, f: Filters) -> dict:
     k = kpis(db, f)
     n_sellers = k["active_sellers"]
@@ -1086,10 +1101,12 @@ def sellers(db: Session, f: Filters) -> dict:
     }
 
 
+@dataset_metric
 def delivery(db: Session, f: Filters) -> dict:
     return delivery_metrics(db, f)
 
 
+@dataset_metric
 def overview(db: Session, f: Filters) -> dict:
     """Everything the Dashboard needs, in one filtered request."""
     delivery_view = delivery_metrics(db, f)
@@ -1109,6 +1126,7 @@ def overview(db: Session, f: Filters) -> dict:
     }
 
 
+@dataset_metric
 def filter_options(db: Session) -> dict:
     """Distinct filter values for the frontend filter controls."""
     def values(sql: str) -> list[str]:

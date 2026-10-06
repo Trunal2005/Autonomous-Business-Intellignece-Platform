@@ -36,3 +36,9 @@ def test_ml_endpoints_available_to_both_roles(client, analyst_auth, auth):
         assert client.get("/api/ml/status", headers=headers).status_code == 200
         assert client.get("/api/ml/anomalies", headers=headers).status_code == 200
         assert client.get("/api/ml/segments/customers", headers=headers).status_code == 200
+        assert client.get("/api/ml/product-segmentation", headers=headers).status_code == 200
+        assert client.get("/api/ml/forecast?target=orders", headers=headers).status_code == 200
+        assert client.get("/api/ml/forecast?target=revenue", headers=headers).status_code == 200
+
+def test_ml_invalid_forecast_target(client, analyst_auth):
+    assert client.get("/api/ml/forecast?target=invalid", headers=analyst_auth).status_code == 400

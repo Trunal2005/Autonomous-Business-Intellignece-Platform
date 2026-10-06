@@ -52,3 +52,8 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Private uploads, source archives and local implementation/test scratch files
+olist dataset.zip
+backend/uploads/
+.universal_work/

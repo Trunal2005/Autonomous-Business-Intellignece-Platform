@@ -14,10 +14,10 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: 'python -m uvicorn app.main:app --port 8000',
+      command: 'python tests/e2e_server.py',
       cwd: '../backend',
       url: 'http://localhost:8000/health',
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 60_000,
     },
     {

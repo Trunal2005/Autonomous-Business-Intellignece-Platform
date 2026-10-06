@@ -40,6 +40,10 @@ def validate_role(role: str) -> str:
 
 def _migrate_legacy_roles(db) -> None:
     """Move retired roles to analyst. Viewer users are never promoted to admin."""
+    # Authentication is read-heavy. Do not acquire SQLite's writer lock for
+    # empty migration updates on every concurrent analytical request.
+    if db.scalar(select(User.id).where(User.role.in_(LEGACY_ROLE_MIGRATION)).limit(1)) is None:
+        return
     for old, new in LEGACY_ROLE_MIGRATION.items():
         db.query(User).filter(User.role == old).update({User.role: new}, synchronize_session=False)
 
@@ -64,7 +68,13 @@ def count_users(role: str | None = None) -> int:
 
 
 def _to_dict(user: User) -> dict:
-    return {"id": user.id, "username": user.username, "role": user.role}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "is_active": bool(user.is_active),
+        "created_at": user.created_at.isoformat() if user.created_at else None
+    }
 
 
 def get_user(username: str) -> dict | None:
@@ -84,7 +94,7 @@ def authenticate(username: str, password: str) -> dict | None:
     _ensure_schema()
     with SessionLocal() as db:
         user = db.scalar(select(User).where(User.username == username))
-        if user and verify_password(password, user.hashed_password):
+        if user and user.is_active and verify_password(password, user.hashed_password):
             return _to_dict(user)
     return None
 
@@ -142,3 +152,26 @@ def has_role(user: dict, *roles: str) -> bool:
 
 def role_at_least(user: dict, min_role: str) -> bool:
     return ROLE_RANK.get(user.get("role", ""), 0) >= ROLE_RANK.get(min_role, 99)
+
+
+def update_status(username: str, is_active: bool) -> dict | None:
+    _ensure_schema()
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.username == username))
+        if not user:
+            return None
+        if user.role == "admin" and not is_active:
+            admins = int(
+                db.scalar(
+                    select(func.count()).select_from(User).where(User.role == "admin", User.is_active == 1)
+                )
+                or 0
+            )
+            # If they are the last active admin, don't let them deactivate themselves
+            if admins <= 1 and user.is_active:
+                raise LastAdminError(
+                    "cannot deactivate the last active admin"
+                )
+        user.is_active = 1 if is_active else 0
+        db.commit()
+        return _to_dict(user)

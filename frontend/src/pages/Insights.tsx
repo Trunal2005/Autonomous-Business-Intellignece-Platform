@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { queryInsights, type InsightsResponse } from '@/services/api'
+import { useFilters } from '@/hooks/useFilters'
+import FilterBar from '@/components/FilterBar'
 
 const EXAMPLES = [
   'What is the total revenue and average order value?',
@@ -8,6 +10,7 @@ const EXAMPLES = [
 ]
 
 export default function Insights() {
+  const { filters } = useFilters()
   const [question, setQuestion] = useState(EXAMPLES[0])
   const [result, setResult] = useState<InsightsResponse | null>(null)
   const [busy, setBusy] = useState(false)
@@ -17,7 +20,7 @@ export default function Insights() {
     setBusy(true)
     setError(null)
     try {
-      const r = await queryInsights(q)
+      const r = await queryInsights(q, 20, filters)
       setResult(r)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Request failed')
@@ -36,6 +39,7 @@ export default function Insights() {
         </p>
       </div>
 
+      <FilterBar />
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -44,6 +48,7 @@ export default function Insights() {
         className="space-y-3"
       >
         <textarea
+          aria-label="Question"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           rows={3}

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "target": "cluster_label",
   "algorithm": "KMeans (RFM, standardized)",
-  "trained_at": "2026-10-03T12:51:36.675817+00:00",
+  "trained_at": "2026-10-06T16:38:59.497030+00:00",
   "dataset_fingerprint": "93f4aa5a3dc0ca0a",
   "features_schema": [
     "recency_days",
@@ -39,5 +39,28 @@
   },
   "status": "available",
   "artifact": "customer_segmentation.joblib",
-  "notes": "monetary log1p-transformed; k selected by silhouette."
+  "notes": "monetary log1p-transformed; k selected by silhouette.",
+  "contract": {
+    "required_semantics": [
+      "customer",
+      "order",
+      "date",
+      "revenue"
+    ],
+    "optional_semantics": [],
+    "training_domain": "Brazilian e-commerce",
+    "currency_code": "BRL",
+    "expected_types": {
+      "customer": "entity",
+      "order": "entity",
+      "date": "datetime",
+      "revenue": "numeric"
+    },
+    "minimum_observations": 1,
+    "frequency": null,
+    "transformations": "recency from latest date + 1 day, unique order frequency, log1p(monetary); saved scaler",
+    "supported_filters": "shared dataset filters before feature aggregation",
+    "output_type": "customer clusters",
+    "automatically_retrained": false
+  }
 }

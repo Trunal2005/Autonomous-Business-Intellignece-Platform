@@ -12,6 +12,8 @@ SQLite (dev) and PostgreSQL (documented target).
 from __future__ import annotations
 
 import re
+import json
+import math
 from dataclasses import dataclass, fields
 from datetime import date, datetime
 from typing import Optional
@@ -21,7 +23,7 @@ from sqlalchemy.orm import Session
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-GRAINS = ("day", "week", "month", "year")
+GRAINS = ("day", "week", "month", "quarter", "year")
 
 
 def order_from(f: Optional["Filters"] = None, with_customer: bool = False) -> str:
@@ -84,6 +86,7 @@ class Filters:
     order_status: Optional[str] = None
     payment_type: Optional[str] = None
     review_score: Optional[int] = None
+    column_filters: Optional[str] = None
 
     def as_dict(self) -> dict:
         return {f.name: getattr(self, f.name) for f in fields(self)}
@@ -125,6 +128,7 @@ def parse_filters(
     payment_type: Optional[str] = None,
     review_score: Optional[int] = None,
     grain: Optional[str] = None,
+    column_filters: Optional[str] = None,
 ) -> Filters:
     """Validate raw query values into a `Filters` instance (422 on bad input)."""
     d_from = _valid_date(date_from, "date_from")
@@ -138,15 +142,29 @@ def parse_filters(
     if grain is not None and grain not in GRAINS:
         raise HTTPException(status_code=422, detail=f"grain must be one of {', '.join(GRAINS)}")
 
+    if column_filters:
+        try:
+            values = json.loads(column_filters)
+            if not isinstance(values, dict) or len(values) > 20 or any(
+                not isinstance(k, str) or not isinstance(v, (str, int, float, bool)) or len(str(v)) > 200
+                for k, v in values.items()
+            ):
+                raise ValueError()
+            if any(isinstance(v, float) and not math.isfinite(v) for v in values.values()):
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise HTTPException(422, "Column filters must be a small JSON object of field/value pairs.") from None
+
     return Filters(
         date_from=d_from,
         date_to=d_to,
         category=_bounded(category, "category", 100),
-        customer_state=_bounded(customer_state, "customer_state", 8),
-        seller_state=_bounded(seller_state, "seller_state", 8),
+        customer_state=_bounded(customer_state, "customer_state", 100),
+        seller_state=_bounded(seller_state, "seller_state", 100),
         order_status=_bounded(order_status, "order_status", 32),
         payment_type=_bounded(payment_type, "payment_type", 32),
         review_score=review_score,
+        column_filters=column_filters,
     )
 
 
@@ -159,6 +177,7 @@ def analytics_filters(
     order_status: Optional[str] = None,
     payment_type: Optional[str] = None,
     review_score: Optional[int] = None,
+    column_filters: Optional[str] = None,
 ) -> Filters:
     """FastAPI dependency: validated filter set for an analytics endpoint."""
     return parse_filters(
@@ -170,6 +189,7 @@ def analytics_filters(
         order_status=order_status,
         payment_type=payment_type,
         review_score=review_score,
+        column_filters=column_filters,
     )
 
 
@@ -199,6 +219,21 @@ def order_where(f: Filters, o: str = "o") -> tuple[str, dict]:
     if f.customer_state:
         clauses.append(f"c.customer_state = :customer_state")
         params["customer_state"] = f.customer_state
+    if f.category or f.seller_state:
+        # Restrict order-grain metrics to orders containing matching items,
+        # without multiplying orders by their item count.
+        source = "fact_order_items fi"
+        matching = []
+        if f.category:
+            matching.append("COALESCE(fi.product_category_name_en, 'unknown') = :category")
+            params["category"] = f.category
+        if f.seller_state:
+            source += " JOIN dim_seller fs ON fs.seller_id = fi.seller_id"
+            matching.append("fs.seller_state = :seller_state")
+            params["seller_state"] = f.seller_state
+        # Uncorrelated membership scans the item scope once, including on
+        # legacy warehouses without a foreign-key index.
+        clauses.append(f"{o}.order_id IN (SELECT fi.order_id FROM {source} WHERE {' AND '.join(matching)})")
     return " AND ".join(clauses), params
 
 
@@ -249,6 +284,12 @@ def period_expr(db: Session, column: str, grain: str = "month") -> str:
     if grain not in GRAINS:
         raise ValueError(f"unsupported grain: {grain}")
     dialect = db.get_bind().dialect.name
+    if grain == "quarter":
+        if dialect == "postgresql":
+            return f"to_char({column}, 'YYYY') || '-Q' || EXTRACT(QUARTER FROM {column})::text"
+        if dialect in {"mysql", "mariadb"}:
+            return f"CONCAT(YEAR({column}), '-Q', QUARTER({column}))"
+        return f"strftime('%Y', {column}) || '-Q' || CAST((CAST(strftime('%m', {column}) AS INTEGER) + 2) / 3 AS INTEGER)"
     fmt = {
         "day": "%Y-%m-%d",
         "week": "%Y-W%W",
@@ -279,7 +320,11 @@ def date_diff_expr(db: Session, later: str, earlier: str) -> str:
 
 
 def median_expr(
-    db: Session, column: str, scope_where: str, from_sql: Optional[str] = None
+    db: Session,
+    column: str,
+    scope_where: str,
+    from_sql: Optional[str] = None,
+    params: Optional[dict] = None,
 ) -> tuple[str, dict]:
     """Median of `column` over rows matching `scope_where`.
 
@@ -303,5 +348,5 @@ def median_expr(
         SELECT AVG(v) AS median FROM ranked
         WHERE rn IN ((total + 1) / 2, (total + 2) / 2)
         """,
-        {},
+        params or {},
     )

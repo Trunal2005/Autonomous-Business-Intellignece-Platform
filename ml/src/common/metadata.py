@@ -64,5 +64,11 @@ def write_metadata(
         "notes": notes,
     }
     path = models_dir() / f"{name}.metadata.json"
+    # Preserve the reviewed inference contract when an administrator explicitly
+    # retrains a model. Uploading datasets never invokes these training scripts.
+    if path.exists():
+        previous = json.loads(path.read_text(encoding="utf-8"))
+        if "contract" in previous:
+            meta["contract"] = previous["contract"]
     path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return path

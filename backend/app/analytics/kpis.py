@@ -1,7 +1,7 @@
 """KPI computations over the warehouse.
 
-Definitions are documented in docs/KPIs.md. All values are derived from loaded
-Olist data; nothing is fabricated. Revenue = sum of order item prices.
+Definitions are documented in docs/KPIs.md. Values derive from the authorized
+selected dataset. Reference revenue is the sum of order item prices.
 
 Historical filter surface (kept for the dashboard endpoints, CSV reports and
 the AI-assistant context): date_from, date_to (ISO dates), order_status.

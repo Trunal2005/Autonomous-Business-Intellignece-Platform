@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { createUser, listUsers, updateUserRole, type PublicUser } from '@/services/api'
+import { adminCreateUser, listUsers, updateUserRole, updateUserStatus, type PublicUser } from '@/services/api'
 import { getStoredUser, type Role } from '@/services/auth'
 
 const ROLE_OPTIONS: Role[] = ['analyst', 'admin']
@@ -53,12 +53,29 @@ export default function AdminUsers() {
     }
   }
 
+  const changeStatus = async (username: string, is_active: boolean) => {
+    setError(null)
+    setMessage(null)
+    try {
+      await updateUserStatus(username, is_active)
+      setMessage(`${username} is now ${is_active ? 'active' : 'inactive'}.`)
+      load()
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : ''
+      setError(
+        errorMessage(err, 'Could not change status.') +
+          (detail.includes('409') ? ' — the last active admin cannot be deactivated.' : ''),
+      )
+      load()
+    }
+  }
+
   const create = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setMessage(null)
     try {
-      await createUser(newUsername.trim(), newPassword, newRole)
+      await adminCreateUser(newUsername.trim(), newPassword, newRole)
       setMessage(`Created ${newUsername.trim()} as ${newRole}.`)
       setNewUsername('')
       setNewPassword('')
@@ -85,7 +102,9 @@ export default function AdminUsers() {
             <tr>
               <th className="text-left py-1">Username</th>
               <th className="text-left py-1">Role</th>
-              <th className="text-right py-1">Change role</th>
+              <th className="text-left py-1">Status</th>
+              <th className="text-left py-1">Created</th>
+              <th className="text-right py-1">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -102,7 +121,15 @@ export default function AdminUsers() {
                     {u.role}
                   </span>
                 </td>
-                <td className="py-2 text-right">
+                <td className="py-2 uppercase text-xs">
+                  <span className={u.is_active ? 'text-emerald-400' : 'text-red-400'}>
+                    {u.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
+                <td className="py-2 text-xs text-neutral-400">
+                  {u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'}
+                </td>
+                <td className="py-2 text-right space-x-2">
                   <select
                     aria-label={`role for ${u.username}`}
                     value={u.role}
@@ -115,6 +142,16 @@ export default function AdminUsers() {
                       </option>
                     ))}
                   </select>
+                  <button
+                    onClick={() => {
+                      if (!u.is_active || window.confirm(`Deactivate ${u.username}?`)) {
+                        changeStatus(u.username, !u.is_active)
+                      }
+                    }}
+                    className={`rounded px-2 py-1 text-sm ${u.is_active ? 'bg-red-900/50 hover:bg-red-900 text-red-200' : 'bg-emerald-900/50 hover:bg-emerald-900 text-emerald-200'}`}
+                  >
+                    {u.is_active ? 'Deactivate' : 'Activate'}
+                  </button>
                 </td>
               </tr>
             ))}

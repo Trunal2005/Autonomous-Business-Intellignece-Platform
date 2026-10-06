@@ -13,7 +13,7 @@ def kpis(
     f: Filters = Depends(analytics_filters),
     db: Session = Depends(get_db),
 ):
-    """Return verified business KPIs computed from the loaded Olist warehouse.
+    """Return verified business KPIs computed from the selected dataset.
 
     Values come from real data via the ETL pipeline (see docs/KPIs.md).
     Accepts the shared analytics filter set (see docs/ANALYTICS.md).

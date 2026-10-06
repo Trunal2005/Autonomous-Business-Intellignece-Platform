@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 
 const TABS = [
   { to: '/admin/users', label: 'User Management' },
+  { to: '/admin/roles', label: 'Role Management' },
   { to: '/admin/health', label: 'System Health' },
   { to: '/admin/data', label: 'Data / ETL' },
   { to: '/admin/warehouse', label: 'Warehouse' },

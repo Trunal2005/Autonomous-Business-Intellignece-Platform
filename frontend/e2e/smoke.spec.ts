@@ -56,9 +56,9 @@ test('analyst gets full BI access but no administration', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Settings' })).toHaveCount(0)
 
   // other BI pages work too (first navigation loads the lazy chart chunk)
-  await page.getByRole('link', { name: 'ML Models' }).click()
-  await expect(page).toHaveURL(/\/models/)
-  await expect(page.getByRole('heading', { name: 'ML Models' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('link', { name: 'Machine Learning' }).click()
+  await expect(page).toHaveURL(/\/ml/)
+  await expect(page.getByRole('heading', { name: 'ML Metrics' })).toBeVisible({ timeout: 30_000 })
 
   // direct admin URL is blocked in the UI
   await page.goto('/admin/users')

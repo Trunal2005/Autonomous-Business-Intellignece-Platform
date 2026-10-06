@@ -9,6 +9,8 @@ from sqlalchemy import inspect, text
 from app.api.deps import require_roles
 from app.core.config import settings
 from app.database.session import engine
+from app.database.deps import get_db
+from app.api.routes.datasets import dataset_context
 
 router = APIRouter()
 
@@ -51,6 +53,63 @@ def system_status(_: dict = Depends(require_roles("admin"))):
     }
 
 
+@router.get("/health")
+def health_status(_: dict = Depends(require_roles("admin"))):
+    """Real health checks for the administration UI."""
+    from app.services import ml as ml_service
+
+    # Check Database Connectivity
+    db_status = "Unavailable"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+            db_status = "Healthy"
+    except Exception:
+        db_status = "Unavailable"
+
+    # Check Warehouse
+    warehouse_status = "Unavailable"
+    try:
+        counts = _table_counts()
+        loaded_tables = sum(1 for v in counts.values() if v)
+        if loaded_tables == len(WAREHOUSE_TABLES):
+            warehouse_status = "Healthy"
+        elif loaded_tables > 0:
+            warehouse_status = "Degraded"
+        else:
+            warehouse_status = "Empty"
+    except Exception:
+        warehouse_status = "Unavailable"
+
+    # Check ML Models
+    ml_status = "Unavailable"
+    available_models = 0
+    total_models = 0
+    try:
+        features = ml_service.feature_status()
+        for f in features:
+            for m in f["models"]:
+                total_models += 1
+                if m.get("artifact_available"):
+                    available_models += 1
+        if total_models > 0 and available_models == total_models:
+            ml_status = f"{available_models}/{total_models} Available"
+        elif total_models > 0:
+            ml_status = f"{available_models}/{total_models} Available (Warning)"
+        else:
+            ml_status = "0/0 Available"
+    except Exception:
+        ml_status = "Unavailable"
+
+    return {
+        "backend": "Healthy",
+        "database": db_status,
+        "warehouse": warehouse_status,
+        "ml_models": ml_status,
+        "authentication": db_status,  # Relies on database
+    }
+
+
 @router.get("/data/etl/status")
 def etl_status(_: dict = Depends(require_roles("admin"))):
     counts = _table_counts()
@@ -73,13 +132,34 @@ def _olist_dir() -> str:
 
 
 @router.get("/warehouse/status")
-def warehouse_status(_: dict = Depends(require_roles("admin"))):
+def warehouse_status(_: dict = Depends(require_roles("admin")), ds=Depends(dataset_context), db=Depends(get_db)):
     """Warehouse administration: schema presence, row counts and load state."""
+    if ds.adapter == "tabular":
+        from app.analytics.tabular import TabularSource
+        source = TabularSource(db)
+        dates = source.filters()["date_range"]
+        return {"dataset_id": ds.id, "dialect": db.get_bind().dialect.name,
+                "schema_tables": [ds.name], "warehouse_tables": {ds.name: ds.row_count},
+                "expected_tables": 1, "loaded_tables": 1, "total_rows": ds.row_count,
+                "complete": ds.status == "READY", "source": ds.name,
+                "min_date": dates["min"], "max_date": dates["max"]}
     insp = inspect(engine)
     existing = set(insp.get_table_names())
     counts = _table_counts()
     loaded_tables = sum(1 for v in counts.values() if v)
     total_rows = sum(v for v in counts.values() if v)
+    min_date = None
+    max_date = None
+    try:
+        if counts.get("fact_orders"):
+            with engine.connect() as conn:
+                res = conn.execute(text("SELECT min(purchase_date), max(purchase_date) FROM fact_orders")).fetchone()
+                if res and res[0]:
+                    min_date = res[0]
+                    max_date = res[1]
+    except Exception:
+        pass
+
     return {
         "dialect": engine.dialect.name,
         "schema_tables": sorted(existing),
@@ -89,6 +169,8 @@ def warehouse_status(_: dict = Depends(require_roles("admin"))):
         "total_rows": total_rows,
         "complete": loaded_tables == len(WAREHOUSE_TABLES),
         "source": str(_olist_dir()),
+        "min_date": min_date,
+        "max_date": max_date,
     }
 
 
@@ -125,7 +207,7 @@ def ml_admin_status(_: dict = Depends(require_roles("admin"))):
 
 
 @router.get("/settings")
-def system_settings(_: dict = Depends(require_roles("admin"))):
+def system_settings(_: dict = Depends(require_roles("admin")), ds=Depends(dataset_context)):
     """Non-secret application settings. Secrets are never returned."""
     return {
         "app": "Sem5 BI Platform",
@@ -140,7 +222,7 @@ def system_settings(_: dict = Depends(require_roles("admin"))):
             "provider": settings.LLM_PROVIDER,
             "timeout_seconds": settings.LLM_TIMEOUT_SECONDS,
         },
-        "dataset": "Olist Brazilian E-Commerce Public Dataset",
+        "dataset": ds.name,
         "reports": ["kpis", "monthly_revenue", "revenue_by_category", "orders_by_status"],
         "secrets_exposed": False,
     }
