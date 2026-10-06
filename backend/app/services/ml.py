@@ -163,7 +163,7 @@ def customer_segments(db=None, f=None) -> dict:
         import numpy as np
         import pandas as pd
         from sqlalchemy import func, select
-        from app.analytics.filters import order_from, order_where, Filters
+        from app.analytics.filters import order_from, order_where, order_monetary_scope, Filters
         from app.analytics.tabular import TabularSource
         from sqlalchemy import text
         ds = db.info["dataset"]
@@ -176,8 +176,9 @@ def customer_segments(db=None, f=None) -> dict:
                                .where(customer.is_not(None)).group_by(customer))
         else:
             where, params = order_where(f)
+            source, amount = order_monetary_scope(f)
             rows = [dict(r) for r in db.execute(text(f"SELECT o.customer_unique_id AS customer, MAX(o.purchase_date) AS last_purchase, "
-                f"COUNT(DISTINCT o.order_id) AS frequency, COALESCE(SUM(o.item_revenue), 0) AS monetary FROM {order_from(f)} WHERE {where} "
+                f"COUNT(DISTINCT o.order_id) AS frequency, COALESCE(SUM({amount}), 0) AS monetary FROM {source} WHERE {where} "
                 "AND o.purchase_date IS NOT NULL AND o.customer_unique_id IS NOT NULL "
                 "GROUP BY o.customer_unique_id"), params).mappings()]
         frame = pd.DataFrame(rows)

@@ -46,7 +46,7 @@ corrections, isolation, model requirements and supported structures, and
 
 ## Testing
 ```powershell
-cd backend; python -m pytest -q          # 95 API/integration tests with loaded reference
+cd backend; python -m pytest -q          # 99 API/integration tests with loaded reference
 cd ml;      python -m pytest -q          # 8 pipeline tests
 cd frontend; npm test                    # 28 component/API tests (Vitest)
 cd frontend; npm run e2e                 # 6 real browser E2E (Playwright)

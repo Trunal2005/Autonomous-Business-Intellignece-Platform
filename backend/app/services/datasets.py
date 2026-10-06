@@ -95,7 +95,7 @@ def ensure_registry(db: Session):
 
 
 def public(ds):
-    return {"dataset_id": ds.id, "dataset_name": ds.name, "owner": ds.owner,
+    result = {"dataset_id": ds.id, "dataset_name": ds.name, "owner": ds.owner,
             "status": ds.status, "source_type": ds.source_type,
             "created_at": ds.created_at.isoformat() if ds.created_at else None,
             "updated_at": ds.updated_at.isoformat() if ds.updated_at else None,
@@ -105,6 +105,17 @@ def public(ds):
                 for column in ds.profile.get("columns", [])]}, "semantics": ds.semantics,
             "capabilities": ds.capabilities, "quality": ds.quality, "error": ds.error,
             "read_only": ds.owner is None}
+    # Older metadata may predate finite-statistic validation. Unknown values
+    # remain unavailable rather than becoming fabricated zeroes.
+    def safe(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, dict):
+            return {k: safe(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [safe(v) for v in value]
+        return value
+    return safe(result)
 
 
 def authorized(db, dataset_id, user, ready=False):
@@ -329,6 +340,8 @@ def profile_frame(df, date_order=None):
             c["statistics"] = {k: (float(v) if pd.notna(v) else None) for k, v in
                                {"min": numeric.min(), "max": numeric.max(), "mean": numeric.mean(),
                                 "median": numeric.median(), "std": numeric.std()}.items()}
+            if any(v is not None and not math.isfinite(v) for v in c["statistics"].values()):
+                raise ValueError(f"{name} produces non-finite calculated statistics; reduce the numeric range.")
         cols.append(c)
     return normalized, cols, {"missing_values": int(df.isna().sum().sum()),
                               "duplicate_rows": int(df.duplicated().sum()), "warnings": warnings}

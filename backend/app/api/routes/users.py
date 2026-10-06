@@ -3,13 +3,14 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user, require_roles
 from app.services import users as user_service
+from app.core.security import NewPassword
 
 router = APIRouter()
 
 
 class PasswordChange(BaseModel):
     current_password: str
-    new_password: str = Field(..., min_length=6, max_length=128)
+    new_password: NewPassword = Field(..., min_length=6, max_length=128)
 
 
 class RoleChange(BaseModel):
@@ -18,7 +19,7 @@ class RoleChange(BaseModel):
 
 class CreateUser(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: NewPassword = Field(..., min_length=6, max_length=128)
     role: str = Field(..., pattern="^(analyst|admin)$")
 
 

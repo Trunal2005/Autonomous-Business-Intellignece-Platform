@@ -1,5 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const backendPort = process.env.SEM5_E2E_BACKEND_PORT || '8000'
+const frontendPort = process.env.SEM5_E2E_FRONTEND_PORT || '5173'
+const apiBase = `http://localhost:${backendPort}`
+const frontendBase = `http://localhost:${frontendPort}`
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -8,7 +13,7 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: frontendBase,
     trace: 'off',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
@@ -16,15 +21,17 @@ export default defineConfig({
     {
       command: 'python tests/e2e_server.py',
       cwd: '../backend',
-      url: 'http://localhost:8000/health',
+      url: `${apiBase}/health`,
+      env: { SEM5_E2E_BACKEND_PORT: backendPort, SEM5_E2E_FRONTEND_URL: frontendBase },
       reuseExistingServer: false,
       timeout: 60_000,
     },
     {
-      command: 'npm run dev',
+      command: `npm run dev -- --port ${frontendPort} --strictPort`,
       cwd: '.',
-      url: 'http://localhost:5173',
-      reuseExistingServer: true,
+      url: frontendBase,
+      env: { VITE_API_BASE_URL: apiBase },
+      reuseExistingServer: false,
       timeout: 60_000,
     },
   ],

@@ -111,6 +111,10 @@ change takes effect immediately.
 
 Hiding navigation is UX only; the backend is what enforces authorization.
 
+Inactive users cannot log in, use access tokens, or refresh sessions. Demotion
+and deactivation preserve at least one active Admin; inactive Admin records do
+not satisfy that requirement. Regression coverage is in test_release_security.py.
+
 ## Verification
 
 ```powershell

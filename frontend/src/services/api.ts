@@ -1,9 +1,13 @@
-import { getRefreshToken, getToken, refreshAccessToken, type Role } from './auth'
+import { getRefreshToken, getToken, getSessionGeneration, refreshAccessToken, type Role } from './auth'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 let activeDatasetId: string | null = null
 let datasetVersion = 0
 const pendingGets = new Map<string, Promise<unknown>>()
+
+export function getRequestContext(): string {
+  return `${datasetVersion}|${getSessionGeneration()}|${localStorage.getItem('sem5_user')}`
+}
 
 export function setDatasetScope(id: string | null) {
   activeDatasetId = id
@@ -220,26 +224,44 @@ export function getForecast(periods = 30, target: 'orders' | 'revenue' = 'orders
   )
 }
 
-export interface SegmentMetrics {
-  k: number
-  silhouette: number
-  cluster_sizes: Record<string, number>
-  cluster_means: Record<string, Record<string, number>>
+export interface MlCompatibility {
+  compatible: boolean
+  reasons: string[]
+  contract: Record<string, unknown>
+  training_domain: string | null
+  dataset_id: string
+  artifact_available: boolean
+}
+
+export interface MlNotApplicable {
+  status: 'not_applicable'
+  reason: string
+  compatibility: MlCompatibility
+  dataset_id: string
+}
+
+export type CustomerSegmentsResponse = MlNotApplicable | {
+  status: 'available'
+  segments: Array<{ segment: number; customers: number; monetary: number }>
+  compatibility: MlCompatibility
+  dataset_id: string
 }
 
 export function getCustomerSegments() {
-  return getJson<{ metrics: SegmentMetrics; status: string }>('/api/ml/segments/customers')
+  return getJson<CustomerSegmentsResponse>('/api/ml/segments/customers')
 }
 
-export interface AnomalyMetrics {
-  contamination: number
+export type AnomaliesResponse = MlNotApplicable | {
+  status: 'available'
   n_days: number
   n_anomalies: number
-  top_anomalies: Array<{ date: string; orders: number; revenue: number; score: number }>
+  anomalies: Array<{ date: string; orders: number; revenue: number; anomaly: number; score: number; customers?: number; rows?: number }>
+  compatibility: MlCompatibility
+  dataset_id: string
 }
 
 export function getAnomalies() {
-  return getJson<{ metrics: AnomalyMetrics; status: string }>('/api/ml/anomalies')
+  return getJson<AnomaliesResponse>('/api/ml/anomalies')
 }
 
 export interface SalesPredictInput {

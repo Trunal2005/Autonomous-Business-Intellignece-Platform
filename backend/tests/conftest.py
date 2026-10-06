@@ -5,9 +5,6 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
-# Ensure the dev SQLite DB resolves regardless of the invocation directory.
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{(BACKEND_DIR / 'sem5.db').as_posix()}")
-
 # Keep tests deterministic/fast: never call a live LLM during the test suite,
 # even if backend/.env enables the assistant.
 os.environ["ENABLE_LLM_ASSISTANT"] = "false"
@@ -15,11 +12,36 @@ os.environ["ENABLE_LLM_ASSISTANT"] = "false"
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app  # noqa: E402
+from tests.database_fixture import test_storage, seed_synthetic_warehouse  # noqa: E402
+
+
+def pytest_addoption(parser):
+    parser.addoption('--reference-db', default=None, help='Optional read-only Olist warehouse snapshot for baseline regressions.')
+
+
+def pytest_configure(config):
+    storage = test_storage(config.getoption('--reference-db'))
+    path = storage.__enter__()
+    config._sem5_storage = storage
+    config._sem5_test_database = path
+    os.environ['DATABASE_URL'] = f'sqlite:///{path.as_posix()}'
+    os.environ['AUTH_ADMIN_PASSWORD'] = 'admin123'
+    os.environ['AUTH_ANALYST_PASSWORD'] = 'analyst123'
+    from app.database.session import engine
+    if not config.getoption('--reference-db'):
+        seed_synthetic_warehouse(engine)
+
+
+def pytest_unconfigure(config):
+    if hasattr(config, '_sem5_storage'):
+        from app.database.session import engine
+        engine.dispose()
+        config._sem5_storage.__exit__(None, None, None)
 
 
 @pytest.fixture(scope="session")
 def client() -> TestClient:
+    from app.main import app
     return TestClient(app)
 
 
@@ -36,8 +58,8 @@ def _warehouse_count(table: str) -> int:
 
 
 @pytest.fixture(scope="session")
-def warehouse_ready() -> bool:
-    return _warehouse_count("fact_orders") > 0
+def warehouse_ready(request) -> bool:
+    return bool(request.config.getoption('--reference-db')) and _warehouse_count("fact_orders") > 0
 
 
 def _token(client: TestClient, username: str, password: str) -> str:

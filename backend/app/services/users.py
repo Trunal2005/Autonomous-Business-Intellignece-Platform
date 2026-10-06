@@ -130,16 +130,16 @@ def update_role(username: str, role: str) -> dict | None:
         user = db.scalar(select(User).where(User.username == username))
         if not user:
             return None
-        if user.role == "admin" and role != "admin":
+        if user.role == "admin" and user.is_active and role != "admin":
             admins = int(
                 db.scalar(
-                    select(func.count()).select_from(User).where(User.role == "admin")
+                    select(func.count()).select_from(User).where(User.role == "admin", User.is_active == 1)
                 )
                 or 0
             )
             if admins <= 1:
                 raise LastAdminError(
-                    "cannot demote the last remaining admin; promote another admin first"
+                    "cannot demote the last active admin; promote another active admin first"
                 )
         user.role = role
         db.commit()

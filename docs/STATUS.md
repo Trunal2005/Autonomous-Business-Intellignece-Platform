@@ -1,5 +1,5 @@
 ## Status
-- Working dir: C:\Users\Kshitij\Downloads\sem-5 (local repo)
+- Local checkout location is machine-specific; run commands from the repository root.
 - Remote: https://github.com/KshitijK21/Sem-5.git
 - Checklist: see docs/CHECKLIST.md
 
@@ -10,7 +10,9 @@
 ## ML (done, parallel track)
 - 5 features trained/evaluated on real data; metrics in docs/ML_BASELINES.md.
 - Backend serves models via /api/ml (status, forecast, segments, anomalies, predict/sales).
-- Frontend /models page: status cards, forecast chart, segment chart, anomaly table, predict form.
+- Frontend `/ml/metrics`, `/ml/revenue-forecast`, `/ml/product-segmentation`:
+  offline metric cards and compatible selected-data forecast/segment views.
+  All six artifacts retain API inference endpoints; sales prediction uses manual checkout inputs.
 
 ## Auth / RBAC (done)
 - Two roles only: **admin** + **analyst** (no viewer). Matrix: docs/RBAC.md.
@@ -19,7 +21,7 @@
   routers, `require_admin` for `/api/admin`), `AUTH_REQUIRED` default true.
 - Single role source of truth (`VALID_ROLES`/`ROLE_RANK` in
   `app/services/users.py`); legacy `viewer` rows migrate to `analyst`.
-- Last-admin protection (409) on role changes; invalid roles rejected.
+- Last-active-admin protection (409) on role/status changes; invalid roles rejected.
 - User management API (profile/password/role), admin user list.
 - Frontend login page, protected routes, `RequireAdmin` + `AccessDenied`,
   auth-aware API client with automatic token refresh on 401; BI vs
@@ -34,8 +36,10 @@
   category, orders by status; permission-aware.
 - Admin API (system status, ETL status, warehouse status, ML status, settings)
   + administration frontend section (`/admin/users`, `/admin/health`,
-  `/admin/data`, `/admin/warehouse`, `/admin/ml`, `/admin/settings`).
-- Dashboard date-range and order-status filters.
+  `/admin/roles`, `/admin/data`, `/admin/warehouse`, `/admin/ml`, `/admin/settings`).
+- Shared URL filters across analytics, reports, ML and assistant. Private uploaded
+  datasets use registry/ownership/selection, detected semantics and capabilities;
+  the Olist adapter remains a read-only shared reference. See UNIVERSAL_DATASETS.md.
 
 ## Quality / tooling (done)
 - Dialect-aware warehouse SQL (`month_expr`) with a Postgres migration guide
@@ -45,13 +49,13 @@
 - Route-level code-splitting + vendor/charts/motion chunks (no >500 kB chunk).
 
 ## Tests (done)
-- Backend: 50 passing (health, auth, refresh, users, RBAC matrix incl. forged
-  JWT role claim, reports, admin, dashboard, dialect, ml, insights).
+- Universal baseline: backend 95 passing; four release security regressions bring
+  the current collection to 99. Coverage includes auth/refresh, users, RBAC,
+  datasets, saved-model inference, analytics, reports, AI and Olist reconciliation.
 - ML: 8 passing (feature builders, metrics, metadata).
-- Frontend: 15 passing (auth service, RequireAuth, RequireAdmin); lint clean;
+- Frontend: 28 passing (auth guards, dataset API/results/filters); lint clean;
   build green.
-- E2E: 5 passing (Playwright: landing, login form, real admin sign-in →
-  dashboard, admin user management, analyst BI-only access). E2E surfaced and
+- E2E: 6 passing (landing/login, real admin/analyst access, upload/switch/filter/AI/export flow). E2E surfaced and
   fixed a nested-`<Router>` runtime bug.
 
 ## Next

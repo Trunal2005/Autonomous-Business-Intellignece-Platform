@@ -3,6 +3,9 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 const TOKEN_KEY = 'sem5_token'
 const REFRESH_KEY = 'sem5_refresh'
 const USER_KEY = 'sem5_user'
+let sessionGeneration = 0
+
+export function getSessionGeneration(): number { return sessionGeneration }
 
 export type Role = 'admin' | 'analyst'
 
@@ -57,6 +60,7 @@ export function isAdminOrAnalyst(): boolean {
 }
 
 export async function login(username: string, password: string): Promise<AuthUser> {
+  const generation = ++sessionGeneration
   const body = new URLSearchParams({ username, password })
   const r = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',
@@ -65,6 +69,7 @@ export async function login(username: string, password: string): Promise<AuthUse
   })
   if (!r.ok) throw new Error(r.status === 401 ? 'Invalid credentials' : `Login failed: ${r.status}`)
   const data = (await r.json()) as { access_token: string; refresh_token: string; user: AuthUser }
+  if (generation !== sessionGeneration) throw new Error('Session changed; stale login discarded.')
   localStorage.setItem(TOKEN_KEY, data.access_token)
   localStorage.setItem(REFRESH_KEY, data.refresh_token)
   localStorage.setItem(USER_KEY, JSON.stringify(data.user))
@@ -72,6 +77,7 @@ export async function login(username: string, password: string): Promise<AuthUse
 }
 
 export async function refreshAccessToken(): Promise<string | null> {
+  const generation = sessionGeneration
   const refresh_token = getRefreshToken()
   if (!refresh_token) return null
   try {
@@ -82,6 +88,7 @@ export async function refreshAccessToken(): Promise<string | null> {
     })
     if (!r.ok) return null
     const data = (await r.json()) as { access_token: string }
+    if (generation !== sessionGeneration || refresh_token !== getRefreshToken()) return null
     localStorage.setItem(TOKEN_KEY, data.access_token)
     return data.access_token
   } catch {
@@ -90,6 +97,7 @@ export async function refreshAccessToken(): Promise<string | null> {
 }
 
 export function logout() {
+  sessionGeneration += 1
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(REFRESH_KEY)
   localStorage.removeItem(USER_KEY)

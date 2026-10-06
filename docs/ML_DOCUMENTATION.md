@@ -40,7 +40,7 @@
   - `GET /models/{name}` — full metadata
   - `GET /forecast?periods=N&target=[orders|revenue]` — recursive daily order or revenue forecast
   - `GET /segments/customers` — customer cluster summary
-  - `GET /product-segmentation` — filter-aware on-the-fly product clustering
+  - `GET /product-segmentation` — filter-aware inference using the saved scaler and KMeans
   - `GET /anomalies` — anomaly metrics
   - `POST /predict/sales` — order item revenue prediction
 
@@ -58,5 +58,15 @@ exists; on a fresh clone (artifacts gitignored) it reports `integration`.
 ## Known constraints
 - Historical only; no external signals (holidays, marketing).
 - Delivery timestamps missing for 2,965 orders; excluded from delivery metrics.
-- Python 3.14 environment: statsmodels/XGBoost unavailable -> sklearn-only.
+- Original training-environment note (Python 3.14): statsmodels/XGBoost unavailable -> sklearn-only.
 - MAPE is high on sparse/skewed targets and is reported transparently.
+
+## Selected datasets and contracts
+All inference routes use the authorized selected dataset and shared filters.
+Compatibility is checked before loading an artifact. Incompatible data returns
+Not Applicable; upload never starts training. Existing transformations and saved
+models are reused. Offline Olist metrics are not upload-specific evaluations.
+See [Universal datasets](UNIVERSAL_DATASETS.md) for each model contract, units,
+minimum history, feature completeness and known limitations. The current ML UI
+provides Metrics, Product Segmentation and Revenue Forecast pages; all six model
+artifacts remain accessible through their existing API endpoints.

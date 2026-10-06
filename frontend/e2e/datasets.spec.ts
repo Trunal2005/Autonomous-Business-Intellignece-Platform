@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 
 const sales = 'date,product,category,region,quantity,price,revenue\n2025-01-01,Book,Books,Pune,2,100,200\n2025-01-02,Pen,Office,Delhi,4,200,800\n'
 const students = 'student_id,name,department,marks,attendance,semester\n1,Ada,CS,80,90,5\n2,Ben,EE,60,70,5\n'
+const apiBase = `http://localhost:${process.env.SEM5_E2E_BACKEND_PORT || '8000'}`
 
 test('real upload, filters, chatbot, ML applicability, switching and filtered exports', async ({ page }) => {
   test.setTimeout(180_000)
@@ -93,10 +94,10 @@ test('real upload, filters, chatbot, ML applicability, switching and filtered ex
     // Remove synthetic uploads and restore the registered reference selection.
     if (token) {
       const headers = { Authorization: `Bearer ${token}` }
-      for (const id of ids) await page.request.delete(`http://localhost:8000/api/datasets/${id}`, { headers })
-      const list = await (await page.request.get('http://localhost:8000/api/datasets', { headers })).json()
+      for (const id of ids) await page.request.delete(`${apiBase}/api/datasets/${id}`, { headers })
+      const list = await (await page.request.get(`${apiBase}/api/datasets`, { headers })).json()
       const reference = list.datasets.find((d: { read_only: boolean }) => d.read_only)
-      if (reference) await page.request.post(`http://localhost:8000/api/datasets/${reference.dataset_id}/select`, { headers })
+      if (reference) await page.request.post(`${apiBase}/api/datasets/${reference.dataset_id}/select`, { headers })
     }
   }
 })

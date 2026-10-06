@@ -7,6 +7,7 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    NewPassword,
 )
 from app.services import users as user_service
 
@@ -19,7 +20,7 @@ class RefreshRequest(BaseModel):
 
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: NewPassword = Field(..., min_length=6, max_length=128)
     role: str = Field("analyst", pattern="^(analyst|admin)$")
 
 
@@ -54,8 +55,8 @@ def refresh(payload: RefreshRequest):
     if not data or data.get("type") != "refresh":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     user = user_service.get_user(data.get("sub", ""))
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown user")
+    if not user or not user.get("is_active"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive or unknown user")
     return {
         "access_token": create_access_token(user["username"], user["role"]),
         "token_type": "bearer",

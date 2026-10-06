@@ -50,16 +50,29 @@ def grouped_answer(question, db, f):
     import re
     from sqlalchemy import func
     ds = db.info["dataset"]
+    q = question.casefold()
+    if re.search(r"\b(where|over|under)\b|[<>]", q):
+        return f"Dataset: {ds.name}. I cannot calculate that condition. Use the available filters."
     if ds.adapter != "tabular":
+        if re.search(r"\brevenue\s+(?:by|per|for each)\s+(?:product\s+)?category\b", q):
+            if re.search(r"\b(average|mean|median|rate|maximum|minimum)\b", q):
+                return f"Dataset: {ds.name}. I cannot calculate that grouped revenue metric."
+            rows = metrics.revenue_by_category(db, f, limit=20)
+            return f"Dataset: {ds.name}. Revenue by category (up to 20 groups):\n" + (
+                "\n".join(f"{r['category']}: {r['revenue']:,.2f}" for r in rows) or "No rows match these filters.")
         return None
     from app.analytics.tabular import TabularSource
     source = TabularSource(db, f)
-    q = question.casefold()
     dimension = next((c for c in source.columns if c["dtype"] in {"text", "boolean"} and
                       re.search(r"\b(?:by|per|each)\s+" + re.escape(c["name"].casefold()) + r"\b", q)), None)
     if dimension is None:
         return None
-    measure = next((c for c in source.columns if c["dtype"] == "numeric" and c["name"].casefold() in q), None)
+    if re.search(r"\b(rate|percentage|median|maximum|minimum)\b", q):
+        return f"Dataset: {ds.name}. I cannot calculate that grouped metric."
+    measure = next((c for c in source.columns if c["dtype"] == "numeric" and
+                    re.search(r"\b" + re.escape(c["name"].casefold()) + r"\b", q)), None)
+    if measure is None and re.search(r"\brevenue\b", q):
+        measure = next((c for c in source.columns if c['name'] == source.fields.get('revenue')), None)
     if measure is None and not any(t in q for t in ("rows", "count", "how many")):
         return "I cannot calculate that grouped measure. Please name an available numeric field."
     col = source.by_name[dimension["name"]]
@@ -82,10 +95,17 @@ def numerical_answer(question: str, context: dict) -> str | None:
     q = question.casefold()
     ds = context["dataset"]
     k = context["kpis"]
+    if re.search(r"\b(by|per|each|where|over|under)\b|\bfor\s+(?:category|state|status)\b", q):
+        return f"Dataset: {ds}. I cannot calculate that grouping or condition. Use the available filters or name a supported grouped measure."
+    if re.search(r"\b(rate|percentage|percent)\b", q):
+        metric = 'on_time_rate' if re.search(r'\bon[ -]time\b', q) else 'late_rate' if re.search(r'\blate\b', q) else None
+        value = k.get(metric) if metric else None
+        return (f"Dataset: {ds}. {metric.replace('_', ' ').capitalize()}: {value:,.2f}%." if isinstance(value, (int, float)) else
+                f"Dataset: {ds}. I cannot calculate that rate from the available confirmed metrics.")
     intents = {"revenue": "total_revenue", "customers": "unique_customers", "customer count": "unique_customers",
                "orders": "total_orders", "transactions": "total_orders", "products": "products_sold",
-               "sellers": "active_sellers", "rows": "row_count", "review": "avg_review_score",
-               "delivery": "avg_delivery_days"}
+               "sellers": "active_sellers", "rows": "row_count", "review score": "avg_review_score",
+               "delivery time": "avg_delivery_days", "delivery days": "avg_delivery_days"}
     answers = []
     matched_fields = []
     for stat in context.get("numeric_statistics", []):
@@ -105,9 +125,10 @@ def numerical_answer(question: str, context: dict) -> str | None:
     if "average order value" in q:
         intents = {"average order value": "avg_order_value", **intents}
     for term, metric in intents.items():
-        if term in q and term not in matched_fields:
+        if re.search(r"\b" + re.escape(term) + r"\b", q) and term not in matched_fields:
             value = k.get(metric)
-            if term == "revenue" and any(word in q for word in ("average revenue", "mean revenue", "median revenue", "maximum revenue", "minimum revenue")):
+            unsupported = "median|maximum|minimum|highest|lowest|total|sum" if metric in {"avg_review_score", "avg_delivery_days"} else "average|mean|median|maximum|minimum|highest|lowest"
+            if metric != 'avg_order_value' and re.search(r"\b(?:" + unsupported + r")(?:\s+of)?(?:\s+the)?\s+" + re.escape(term) + r"\b", q):
                 value = None
             answers.append(f"{term.capitalize()}: {value:,.2f}." if isinstance(value, (int, float)) else
                            f"I cannot calculate {term} because its required fields are unavailable for this dataset.")

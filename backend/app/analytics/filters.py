@@ -279,6 +279,19 @@ def item_where(f: Filters, i: str = "i", o: str = "o") -> tuple[str, dict]:
     return " AND ".join(clauses), params
 
 
+def order_monetary_scope(f: Filters, with_customer: bool = False) -> tuple[str, str]:
+    """One row per order, with amounts restricted to the shared item scope."""
+    source = order_from(f, with_customer=with_customer)
+    if not (f.category or f.seller_state):
+        return source, "COALESCE(o.item_revenue, 0)"
+    where, _ = item_where(f)
+    source += f""" LEFT JOIN (
+        SELECT i.order_id, SUM(i.price) AS amount
+        FROM {item_from(f)} WHERE {where} GROUP BY i.order_id
+    ) filtered_items ON filtered_items.order_id = o.order_id"""
+    return source, "COALESCE(filtered_items.amount, 0)"
+
+
 def period_expr(db: Session, column: str, grain: str = "month") -> str:
     """Dialect-aware grouping expression for `column` (fixed grain whitelist)."""
     if grain not in GRAINS:

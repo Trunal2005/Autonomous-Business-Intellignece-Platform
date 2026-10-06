@@ -28,6 +28,7 @@ from app.analytics.filters import (
     median_expr,
     order_from,
     order_where,
+    order_monetary_scope,
     period_expr,
 )
 
@@ -153,11 +154,13 @@ def kpis(db: Session, f: Filters) -> dict:
             WHERE {{state_sql}}
             GROUP BY o.customer_unique_id
         ) t
-        WHERE 1=1
+        WHERE t.cid IN (
+            SELECT o.customer_unique_id FROM {order_from(f)} WHERE {where}
+        )
     """.format(
         state_sql=state_sql
     )
-    new_params = dict(state_params)
+    new_params = {**state_params, **params}
     if f.date_from:
         new_sql += " AND t.first_order >= :new_from"
         new_params["new_from"] = f.date_from
@@ -391,14 +394,15 @@ def review_distribution(db: Session, f: Filters) -> list[dict]:
 def top_customer_states(db: Session, f: Filters, limit: int = 10) -> list[dict]:
     """Customer concentration by state (customer counts)."""
     where, params = order_where(f)
+    source, amount = order_monetary_scope(f, with_customer=True)
     rows = _rows(
         db,
         f"""
         SELECT COALESCE(c.customer_state, 'unknown') AS state,
                COUNT(DISTINCT o.customer_unique_id) AS customers,
                COUNT(*) AS orders,
-               COALESCE(SUM(o.item_revenue), 0) AS revenue
-        FROM {order_from(f, with_customer=True)}
+               COALESCE(SUM({amount}), 0) AS revenue
+        FROM {source}
         WHERE {where}
         GROUP BY c.customer_state
         ORDER BY customers DESC
@@ -413,14 +417,15 @@ def top_customer_states(db: Session, f: Filters, limit: int = 10) -> list[dict]:
 
 def payment_types(db: Session, f: Filters) -> list[dict]:
     where, params = order_where(f)
+    source, amount = order_monetary_scope(f, with_customer=False)
     rows = _rows(
         db,
         f"""
         SELECT COALESCE(o.payment_type, 'unknown') AS payment_type,
                COUNT(*) AS orders,
-               COALESCE(SUM(o.item_revenue), 0) AS revenue,
+               COALESCE(SUM({amount}), 0) AS revenue,
                COALESCE(AVG(o.payment_installments), 0) AS avg_installments
-        FROM {order_from(f)}
+        FROM {source}
         WHERE {where}
         GROUP BY o.payment_type
         ORDER BY revenue DESC
@@ -438,6 +443,7 @@ def payment_types(db: Session, f: Filters) -> list[dict]:
 
 def payment_installments(db: Session, f: Filters) -> list[dict]:
     where, params = order_where(f)
+    source, amount = order_monetary_scope(f, with_customer=False)
     rows = _rows(
         db,
         f"""
@@ -451,8 +457,8 @@ def payment_installments(db: Session, f: Filters) -> list[dict]:
                 ELSE '11+'
             END AS installments,
             COUNT(*) AS orders,
-            COALESCE(SUM(o.item_revenue), 0) AS revenue
-        FROM {order_from(f)}
+            COALESCE(SUM({amount}), 0) AS revenue
+        FROM {source}
         WHERE {where}
         GROUP BY installments
         ORDER BY orders DESC
@@ -528,14 +534,15 @@ def items_per_order(db: Session, f: Filters) -> list[dict]:
 
 def customers_by_state(db: Session, f: Filters, limit: int = 30) -> list[dict]:
     where, params = order_where(f)
+    source, amount = order_monetary_scope(f, with_customer=True)
     rows = _rows(
         db,
         f"""
         SELECT COALESCE(c.customer_state, 'unknown') AS state,
                COUNT(DISTINCT o.customer_unique_id) AS customers,
                COUNT(*) AS orders,
-               COALESCE(SUM(o.item_revenue), 0) AS revenue
-        FROM {order_from(f, with_customer=True)}
+               COALESCE(SUM({amount}), 0) AS revenue
+        FROM {source}
         WHERE {where}
         GROUP BY c.customer_state
         ORDER BY customers DESC
@@ -552,21 +559,22 @@ def customers_by_state(db: Session, f: Filters, limit: int = 30) -> list[dict]:
 
 def customer_spend_distribution(db: Session, f: Filters) -> list[dict]:
     where, params = order_where(f)
+    source, amount = order_monetary_scope(f, with_customer=False)
     rows = _rows(
         db,
         f"""
         SELECT bucket, COUNT(*) AS customers, SUM(spend) AS revenue FROM (
             SELECT o.customer_unique_id,
-                   SUM(o.item_revenue) AS spend,
+                   SUM({amount}) AS spend,
                    CASE
-                       WHEN SUM(o.item_revenue) < 100 THEN 'R$ 0-99'
-                       WHEN SUM(o.item_revenue) < 300 THEN 'R$ 100-299'
-                       WHEN SUM(o.item_revenue) < 600 THEN 'R$ 300-599'
-                       WHEN SUM(o.item_revenue) < 1000 THEN 'R$ 600-999'
-                       WHEN SUM(o.item_revenue) < 2000 THEN 'R$ 1000-1999'
+                       WHEN SUM({amount}) < 100 THEN 'R$ 0-99'
+                       WHEN SUM({amount}) < 300 THEN 'R$ 100-299'
+                       WHEN SUM({amount}) < 600 THEN 'R$ 300-599'
+                       WHEN SUM({amount}) < 1000 THEN 'R$ 600-999'
+                       WHEN SUM({amount}) < 2000 THEN 'R$ 1000-1999'
                        ELSE 'R$ 2000+'
                    END AS bucket
-            FROM {order_from(f)}
+            FROM {source}
             WHERE {where}
             GROUP BY o.customer_unique_id
         ) t
@@ -614,15 +622,16 @@ def order_frequency(db: Session, f: Filters) -> list[dict]:
 
 def top_customers(db: Session, f: Filters, limit: int = 20) -> list[dict]:
     where, params = order_where(f)
+    source, amount = order_monetary_scope(f, with_customer=True)
     rows = _rows(
         db,
         f"""
         SELECT SUBSTR(o.customer_unique_id, 1, 8) AS customer,
                COALESCE(c.customer_state, 'unknown') AS state,
                COUNT(*) AS orders,
-               COALESCE(SUM(o.item_revenue), 0) AS revenue,
+               COALESCE(SUM({amount}), 0) AS revenue,
                MAX(o.purchase_date) AS last_order
-        FROM {order_from(f, with_customer=True)}
+        FROM {source}
         WHERE {where}
         GROUP BY o.customer_unique_id, c.customer_state
         ORDER BY revenue DESC

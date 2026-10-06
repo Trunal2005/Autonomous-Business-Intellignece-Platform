@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { queryInsights, type InsightsResponse } from '@/services/api'
+import { useEffect, useRef, useState } from 'react'
+import { getRequestContext, queryInsights, type InsightsResponse } from '@/services/api'
 import { useFilters } from '@/hooks/useFilters'
 import FilterBar from '@/components/FilterBar'
 
@@ -15,17 +15,34 @@ export default function Insights() {
   const [result, setResult] = useState<InsightsResponse | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const filterKey = JSON.stringify(filters)
+  const context = getRequestContext()
+  const generation = useRef(0)
+  const current = useRef({ question, filterKey })
+  current.current = { question, filterKey }
+  useEffect(() => {
+    generation.current += 1
+    setResult(null); setError(null); setBusy(false)
+    return () => { generation.current += 1 }
+  }, [filterKey, context])
 
   const ask = async (q: string) => {
+    const request = ++generation.current
+    const scope = getRequestContext()
+    const selectedFilters = filterKey
+    current.current.question = q
+    const isCurrent = () => request === generation.current && scope === getRequestContext() &&
+      selectedFilters === current.current.filterKey && q === current.current.question
     setBusy(true)
     setError(null)
+    setResult(null)
     try {
       const r = await queryInsights(q, 20, filters)
-      setResult(r)
+      if (isCurrent()) setResult(r)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Request failed')
+      if (isCurrent()) setError(err instanceof Error ? err.message : 'Request failed')
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
   }
 
@@ -50,7 +67,7 @@ export default function Insights() {
         <textarea
           aria-label="Question"
           value={question}
-          onChange={(e) => setQuestion(e.target.value)}
+          onChange={(e) => { generation.current += 1; setResult(null); setError(null); setBusy(false); setQuestion(e.target.value) }}
           rows={3}
           className="w-full bg-neutral-900/60 border border-neutral-800 rounded-lg p-3 text-sm"
           placeholder="Ask about KPIs, categories, orders, or model status…"

@@ -11,7 +11,8 @@ Supported filters:
 - `order_status`: Order status string.
 - `payment_type`: Payment type string.
 - `review_score`: Integer from 1 to 5.
-- `grain`: `day`, `week`, `month`, `year`.
+- `grain`: `day`, `week`, `month`, `quarter`, `year` on supported series endpoints.
+- `column_filters`: validated JSON field/value pairs for uploaded datasets.
 
 ## Backend Endpoints
 
@@ -30,3 +31,9 @@ All endpoints are mounted under `/api/analytics` and require authenticated acces
 
 Analytics pages (`/analytics/sales`, `/analytics/orders`, etc.) are mounted under `AnalyticsLayout.tsx`.
 They consume the `useFilters()` hook to retrieve the current filter state and pass it to API calls (e.g. `getAnalyticsSales(filters)`). Data is visualized using Recharts components. All KPIs are standardized using the shared `KpiCard` component.
+
+These detailed business measures describe the reference warehouse adapter.
+Uploads use the same routes and metric layer with observed numeric summaries,
+entity counts, distributions and trends. Sections without required semantic fields
+return reasoned unavailable states. Active dataset ownership is checked before
+queries; switching clears old filters and content. See UNIVERSAL_DATASETS.md.

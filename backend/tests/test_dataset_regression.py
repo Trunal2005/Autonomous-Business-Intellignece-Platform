@@ -41,3 +41,26 @@ def test_reference_reports_and_chatbot_respect_shared_filters(client, warehouse_
         assert sum(float(r[field]) for r in rows) == pytest.approx(k['total_revenue'], abs=.01)
     answer = client.post('/api/insights/query', params=params, json={'question':'What is the total revenue?'}, headers=headers).json()
     assert f"{k['total_revenue']:,.2f}" in answer['answer']
+
+
+def test_reference_category_breakdowns_and_segments_reconcile(client, warehouse_ready, auth):
+    if not warehouse_ready:
+        pytest.skip('Explicit Olist reference snapshot not supplied')
+    from app.analytics import metrics
+    from app.analytics.filters import Filters
+    from app.models.dataset import Dataset
+    from app.services import ml
+    headers = {**auth, 'X-Dataset-ID': REFERENCE_ID}
+    assert client.get('/api/dashboard/kpis', headers=headers).status_code == 200
+    with SessionLocal() as db:
+        db.info['dataset'] = db.get(Dataset, REFERENCE_ID)
+        filters = Filters(category='health_beauty')
+        expected = round(db.scalar(text("SELECT SUM(price) FROM fact_order_items WHERE product_category_name_en='health_beauty'")), 2)
+        assert expected == 1258681.34
+        assert metrics.kpis(db, filters)['total_revenue'] == expected
+        for function in [metrics.payment_types, metrics.payment_installments, metrics.customer_spend_distribution,
+                         metrics.customers_by_state,
+                         lambda session, f: metrics.top_customer_states(session, f, limit=100),
+                         lambda session, f: metrics.top_customers(session, f, limit=100000)]:
+            assert sum(row['revenue'] for row in function(db, filters)) == pytest.approx(expected, abs=.01)
+        assert sum(row['monetary'] for row in ml.customer_segments(db, filters)['segments']) == pytest.approx(expected, abs=.01)

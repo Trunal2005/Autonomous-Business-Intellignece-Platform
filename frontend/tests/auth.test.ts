@@ -7,6 +7,7 @@ import {
   isAdminOrAnalyst,
   login,
   logout,
+  refreshAccessToken,
 } from '@/services/auth'
 
 describe('auth service', () => {
@@ -58,6 +59,44 @@ describe('auth service', () => {
     expect(getToken()).toBeNull()
     expect(getStoredUser()).toBeNull()
     expect(localStorage.getItem('sem5_refresh')).toBeNull()
+  })
+
+  it('discards refresh after logout', async () => {
+    localStorage.setItem('sem5_refresh', 'refresh-a')
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve })))
+    const pending = refreshAccessToken()
+    logout()
+    finish(new Response(JSON.stringify({ access_token: 'late-a' }), { status: 200 }))
+    expect(await pending).toBeNull()
+    expect(getToken()).toBeNull()
+  })
+
+  it('discards old refresh after a newer login', async () => {
+    localStorage.setItem('sem5_refresh', 'refresh-a')
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'b', refresh_token: 'refresh-b', user: { id: 2, username: 'b', role: 'analyst' } }), { status: 200 })))
+    const pending = refreshAccessToken()
+    await login('b', 'password')
+    finish(new Response(JSON.stringify({ access_token: 'late-a' }), { status: 200 }))
+    expect(await pending).toBeNull()
+    expect(getToken()).toBe('b')
+  })
+
+  it('refreshes a restored browser session normally', async () => {
+    localStorage.setItem('sem5_refresh', 'restored-refresh')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ access_token: 'renewed' }), { status: 200 })))
+    expect(await refreshAccessToken()).toBe('renewed')
+    expect(getToken()).toBe('renewed')
+  })
+
+  it('does not overwrite authentication on refresh failure', async () => {
+    localStorage.setItem('sem5_refresh', 'refresh-a')
+    localStorage.setItem('sem5_token', 'existing')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 401 })))
+    expect(await refreshAccessToken()).toBeNull()
+    expect(getToken()).toBe('existing')
   })
 })
 
