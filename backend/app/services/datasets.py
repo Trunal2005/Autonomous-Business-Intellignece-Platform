@@ -22,13 +22,14 @@ from fastapi import HTTPException
 from sqlalchemy import Column, Float, Integer, MetaData, String, Table, Text, func, inspect, select
 from sqlalchemy.orm import Session
 
-from app.models.dataset import Dataset, DatasetSelection
+from app.models.dataset import Dataset, DatasetSelection, DatasetBundleTable
+from app.core.config import settings
 
-MAX_BYTES = int(os.getenv("DATASET_MAX_BYTES", 20 * 1024 * 1024))
-MAX_ROWS = int(os.getenv("DATASET_MAX_ROWS", 100_000))
-MAX_COLUMNS = int(os.getenv("DATASET_MAX_COLUMNS", 100))
-MAX_SECONDS = int(os.getenv("DATASET_MAX_SECONDS", 60))
-MAX_CELLS = int(os.getenv("DATASET_MAX_CELLS", 2_000_000))
+MAX_BYTES = settings.DATASET_MAX_BYTES
+MAX_ROWS = settings.DATASET_MAX_ROWS
+MAX_COLUMNS = settings.DATASET_MAX_COLUMNS
+MAX_SECONDS = settings.DATASET_MAX_SECONDS
+MAX_CELLS = settings.DATASET_MAX_CELLS
 REFERENCE_ID = "00000000-0000-0000-0000-000000000001"
 
 # Deliberately conservative: ambiguous 'amount' is currency, not revenue;
@@ -74,6 +75,7 @@ def ensure_registry(db: Session):
     bind = db.get_bind()
     Dataset.__table__.create(bind, checkfirst=True)
     DatasetSelection.__table__.create(bind, checkfirst=True)
+    DatasetBundleTable.__table__.create(bind, checkfirst=True)
     if not db.get(Dataset, REFERENCE_ID) and "fact_orders" in inspect(bind).get_table_names():
         from sqlalchemy import text
         n = db.scalar(text("SELECT COUNT(*) FROM fact_orders"))
@@ -145,6 +147,8 @@ def resolve(db, user, requested=None):
         else:
             raise HTTPException(409, "Select a ready dataset in Dataset Manager.")
     ds = authorized(db, dataset_id, user, ready=True)
+    if ds.source_type == "bundle" and not ds.profile.get('relational_analysis',{}).get('supported'):
+        raise HTTPException(409, "Select a table inside this bundle to analyze. Cross-table analytics are not supported.")
     db.info["dataset"] = ds
     return ds
 
@@ -179,11 +183,14 @@ def _headers(values):
     return names
 
 
-def parse_source(raw, suffix):
+def parse_source(raw, suffix, *, max_rows=None, max_cells=None, max_bytes=None, check=None):
+    max_rows = MAX_ROWS if max_rows is None else max_rows
+    max_cells = MAX_CELLS if max_cells is None else max_cells
+    max_bytes = MAX_BYTES if max_bytes is None else max_bytes
     if not raw:
         raise ValueError("The uploaded file is empty.")
-    if len(raw) > MAX_BYTES:
-        raise ValueError(f"File exceeds the {MAX_BYTES // 1024 // 1024} MB limit.")
+    if len(raw) > max_bytes:
+        raise ValueError(f"File contains {len(raw)} bytes; limit is {max_bytes} bytes.")
     if suffix == ".csv":
         try:
             content = raw.decode("utf-8-sig")
@@ -192,10 +199,15 @@ def parse_source(raw, suffix):
         if "\x00" in content:
             raise ValueError("CSV contains invalid binary content.")
         try:
-            dialect = csv.Sniffer().sniff(content[:8192], delimiters=",;\t|")
+            # Free-text reviews are not evidence of delimiter/escaping rules.
+            # Infer only the header delimiter; standard CSV doubled quotes must
+            # work even when no escaped quote occurs in the sniffing sample.
+            end = content.find('\n')
+            header = content[:end if end >= 0 else len(content)].rstrip('\r')
+            dialect = csv.Sniffer().sniff(header, delimiters=",;\t|")
         except csv.Error:
             dialect = csv.excel
-        reader = csv.reader(io.StringIO(content), dialect, strict=True)
+        reader = csv.reader(io.StringIO(content, newline=''), dialect, quotechar='"', doublequote=True, strict=True)
         names = _headers(next(reader, []))
         rows = []
         for row in reader:
@@ -203,11 +215,13 @@ def parse_source(raw, suffix):
                 continue
             if len(row) != len(names):
                 raise ValueError("CSV rows must have the same number of fields as the header.")
-            if len(rows) >= MAX_ROWS:
-                raise ValueError(f"Dataset exceeds the {MAX_ROWS} row limit.")
-            if (len(rows) + 1) * len(names) > MAX_CELLS:
-                raise ValueError("Dataset exceeds the configured processing memory budget.")
+            if len(rows) >= max_rows:
+                raise ValueError(f"Table exceeds the {max_rows} row limit.")
+            if (len(rows) + 1) * len(names) > max_cells:
+                raise ValueError(f"Table exceeds the {max_cells} cell limit.")
             rows.append(row)
+            if check and len(rows) % 5000 == 0:
+                check()
         df = pd.DataFrame(rows, columns=names)
     elif suffix == ".json":
         def pairs(items):
@@ -233,7 +247,7 @@ def parse_source(raw, suffix):
     elif suffix in {".xlsx", ".xls"}:
         if suffix == ".xlsx":
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-                if sum(i.file_size for i in archive.infolist()) > MAX_BYTES * 10:
+                if sum(i.file_size for i in archive.infolist()) > settings.DATASET_MAX_SPREADSHEET_EXPANDED_BYTES:
                     raise ValueError("Spreadsheet expanded size exceeds the safety limit.")
                 if any("vbaProject" in i.filename or "externalLinks/" in i.filename for i in archive.infolist()):
                     raise ValueError("Macros and external spreadsheet links are unsupported.")
@@ -261,22 +275,23 @@ def parse_source(raw, suffix):
         raise ValueError("Unsupported file type. Use CSV, XLSX, XLS or flat-record JSON.")
     if df.empty:
         raise ValueError("Dataset contains no data rows.")
-    if len(df) > MAX_ROWS or len(df.columns) > MAX_COLUMNS or len(df) * len(df.columns) > MAX_CELLS:
+    if len(df) > max_rows or len(df.columns) > MAX_COLUMNS or len(df) * len(df.columns) > max_cells:
         raise ValueError("Dataset exceeds the configured row or column limit.")
     return df.replace(r"^\s*$", None, regex=True).replace({"NaN": None, "null": None})
 
 
-def profile_frame(df, date_order=None):
+def profile_frame(df, date_order=None, check=None):
     cols, warnings = [], []
     normalized = df.copy()
     for i, name in enumerate(df.columns):
+        if check: check()
         s = df[name]
         present = s.dropna()
         canonical = key(name)
         currency_code = next((code for code in ("BRL", "USD", "INR", "EUR", "GBP")
                               if canonical.endswith(code.lower()) and canonical[:-3] in ALIASES["revenue"] | ALIASES["currency"] | ALIASES["price"]), None)
         semantic_key = canonical[:-3] if currency_code else canonical
-        idlike = canonical.endswith("id") or canonical in {"phone", "phonenumber", "zipcode", "postalcode"}
+        idlike = canonical.endswith("id") or canonical.endswith("zipcodeprefix") or canonical in {"phone", "phonenumber", "zipcode", "postalcode"}
         role = next((r for r, aliases in ALIASES.items() if semantic_key in aliases), None)
         if canonical in {"currency", "currencycode"}:
             codes = set(present.astype(str).str.upper().str.strip())
@@ -356,6 +371,14 @@ def infer_semantics(cols):
         elif candidates:
             ambiguous.append({"role": role, "candidates": [c["name"] for c in candidates]})
     codes = {c.get("currency_code") for c in cols if c.get("currency_code")}
+    names = {c['name']: c for c in cols}
+    # Exact Olist headers override ambiguous generic timestamp/identifier suggestions.
+    suggestions = {"date": "order_purchase_timestamp", "customer": "customer_unique_id",
+                   "delivery_date": "order_delivered_customer_date", "estimated_date": "order_estimated_delivery_date"}
+    for role, name in suggestions.items():
+        if name in names and (role == 'customer' or names[name]['dtype'] == 'datetime'):
+            mappings[role] = name
+            ambiguous = [a for a in ambiguous if a['role'] != role]
     return {"fields": mappings, "ambiguities": ambiguous, "currency_code": next(iter(codes)) if len(codes) == 1 else None,
             "domain": "commerce" if "revenue" in mappings or "product" in mappings else "general"}
 

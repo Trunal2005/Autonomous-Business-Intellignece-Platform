@@ -20,18 +20,25 @@ import FilterBar from '@/components/FilterBar'
 
 import { KpiCard } from '@/components/KpiCard'
 import { fmtMoney } from '@/services/format'
+import { useDataset } from '@/hooks/useDataset'
+import { Link } from 'react-router-dom'
 
 const COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316']
 
 export default function Dashboard() {
-  const { filters } = useFilters()
+  const { filters, resetFilters } = useFilters()
+  const { active, datasets } = useDataset()
+  const activeId = active?.dataset_id
+  const [retry, setRetry] = useState(0)
   const [data, setData] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
 
   useEffect(() => {
     let current = true
+    if (!activeId) { setData(null); setState('ready'); return () => { current = false } }
     setState('loading')
+    setData(null); setError(null)
     getAnalyticsOverview(filters)
       .then((res) => {
         if (!current) return
@@ -40,22 +47,27 @@ export default function Dashboard() {
       })
       .catch(e => { if (current) { setError(e.message); setState('error') } })
     return () => { current = false }
-  }, [filters])
+  }, [filters, activeId, active?.updated_at, retry])
+
+  if (!active) return <section className="border border-neutral-800 rounded-2xl p-8 space-y-4"><h1 className="text-3xl font-semibold">Dashboard</h1><h2 className="text-lg">Start with your data</h2><p className="text-neutral-400">Upload a file or CSV folder, inspect its schema and choose a table to see observed metrics.</p><Link className="inline-block bg-blue-600 rounded-lg px-4 py-2" to="/datasets">Upload your first dataset</Link></section>
 
   if (state === 'error') {
     return (
-      <div className="text-red-400">
-        {error || 'Could not load data.'}
+      <div className="border border-red-900 bg-red-950/20 rounded-xl p-6 space-y-3" role="alert">
+        <h1 className="text-2xl font-semibold">Dashboard</h1>
+        <p>{error || 'Could not load data.'}</p>
+        <button className="px-4 py-2 bg-neutral-800 rounded" onClick={() => setRetry(r => r + 1)}>Retry dashboard</button>
+        <Link to="/datasets" className="block text-blue-400">Choose a dataset in Dataset Manager</Link>
       </div>
     )
   }
 
   const renderContent = () => {
     if (state === 'loading' || !data) {
-      return <div className="text-neutral-400">Loading dataset metrics...</div>
+      return <div role="status" className="space-y-4"><p className="text-neutral-400">Loading dataset metrics...</p><div className="grid grid-cols-2 lg:grid-cols-4 gap-4 animate-pulse">{[1, 2, 3, 4].map(i => <div key={i} className="h-28 rounded-xl bg-neutral-900 border border-neutral-800" />)}</div></div>
     }
 
-    if ('metric_cards' in data) return <DatasetResults data={data} />
+    if ('metric_cards' in data) return <div className="space-y-4">{data.revenue_definition && <div className="border border-neutral-800 rounded-xl p-4 text-sm space-y-2"><p>{data.revenue_definition}</p><p>Currency: {data.currency_code || 'Unconfirmed — confirm in Dataset Manager'}. Grain: orders. Every metric uses the current filters.</p><p>Missing values: {active.tables?.reduce((n,t) => n+(t.quality.missing_values || 0),0).toLocaleString()}. Tables: {active.tables?.length}. Uploaded record provenance is unverified.</p><details><summary>Validated relationships and data coverage</summary>{data.relationships?.relationships?.map((r: any,i: number) => <p key={i}>{r.from_table} → {r.to_table}: {r.enabled ? 'Enabled' : r.reason} · unmatched {r.unmatched_rows ?? 'not applicable'} · null keys {r.null_keys ?? 'not applicable'}</p>)}</details></div>}<DatasetResults data={data} dashboard revenueAvailable={!!active?.semantics.fields?.revenue} monetaryFields={active.tables ? ['Item revenue','Average order value','Payment total'] : [active?.semantics.fields?.revenue, active?.semantics.fields?.currency, active?.semantics.fields?.price].filter((field): field is string => !!field)} /></div>
 
     const { kpis, revenue_series, revenue_by_category, orders_by_status, top_customer_states, delivery } = data
 
@@ -182,13 +194,15 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-neutral-500">
-          Executive overview of the active dataset.
-        </p>
+      <div className="rounded-2xl border border-neutral-800 bg-gradient-to-br from-blue-950/40 via-neutral-900 to-neutral-950 p-6 sm:p-8">
+        <div className="flex flex-wrap justify-between gap-4"><div><p className="text-xs uppercase tracking-widest text-blue-400 mb-2">Business intelligence overview</p><h1 className="text-3xl font-semibold">Dashboard</h1><p className="mt-2 text-sm text-neutral-400">Explore observed performance, current filters and data quality.</p></div><Link className="self-start border border-neutral-600 px-4 py-2 rounded-lg text-sm" to="/datasets">Change data source</Link></div>
+        <div className="mt-5 flex flex-wrap gap-3 text-sm"><span className="rounded-full bg-neutral-800 px-3 py-1">{active?.bundle_id ? datasets.find(d => d.dataset_id === active.bundle_id)?.dataset_name : active?.dataset_name || 'No selected dataset'}</span>{active?.bundle_id && <span className="rounded-full bg-blue-950 px-3 py-1 break-all">Table: {active.relative_path || active.dataset_name}</span>}<span className="text-emerald-400 px-2 py-1">{active?.status || 'Select a source'}</span></div>
+        {active?.bundle_id && <p className="mt-3 text-xs text-neutral-400">Analysis grain: rows in the selected table. Cross-table joins are unavailable; no totals are combined across tables.</p>}
       </div>
       <FilterBar showGrain={false} />
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-400" aria-label="Active filter summary"><span>{Object.keys(filters).length ? `Active filters: ${Object.entries(filters).map(([k, v]) => `${k.replace(/_/g, ' ')} = ${v}`).join(' · ')}` : 'All available records · no active filters'}</span>{Object.keys(filters).length > 0 && <button onClick={resetFilters} className="text-blue-400">Clear all filters</button>}</div>
+      {active && <div className="grid sm:grid-cols-3 gap-3"><div className="border border-neutral-800 rounded-xl p-4"><p className="text-xs uppercase text-neutral-500">Source volume</p><p className="mt-2 font-semibold">{active.tables ? `${active.row_count.toLocaleString()} source rows · ${active.tables.length} tables · ${active.column_count} table columns` : `${active.row_count.toLocaleString()} rows · ${active.column_count} fields`}</p><p className="text-xs text-neutral-500 mt-1">{active.tables ? 'All separate tables before filters; repeated keys are not business totals' : 'Whole table before filters'}</p></div><div className="border border-neutral-800 rounded-xl p-4"><p className="text-xs uppercase text-neutral-500">Profile quality</p><p className="mt-2">{active.quality.missing_values ?? 'Unknown'} missing values · {active.quality.duplicate_rows ?? 'Unknown'} duplicate rows</p><p className="text-xs text-neutral-500 mt-1">{active.tables ? 'Sum of per-table profiles; duplicates are retained' : 'Whole-table profile; duplicates are retained'}</p></div><div className="border border-neutral-800 rounded-xl p-4"><p className="text-xs uppercase text-neutral-500">Monetary units</p><p className="mt-2">{active.semantics.currency_code || 'Currency unconfirmed'}</p><p className="text-xs text-neutral-500 mt-1">Values retain source units; no conversion</p></div></div>}
+      {active?.quality.warnings?.length ? <div className="border border-amber-900/60 bg-amber-950/20 rounded-xl p-4 text-sm text-amber-300">{active.quality.warnings.map(w => <p key={w}>{w}</p>)}</div> : null}
       {renderContent()}
     </div>
   )

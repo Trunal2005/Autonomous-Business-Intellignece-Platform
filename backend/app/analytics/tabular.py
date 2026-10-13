@@ -191,6 +191,17 @@ def dataset_metric(function):
                 raise HTTPException(422, "Column filters are not supported by this reference warehouse.")
             return function(db, *args, **kwargs)
         f = args[0] if args and isinstance(args[0], Filters) else kwargs.get("f")
+        if ds.source_type == 'bundle':
+            from app.analytics.bundle import BundleSource
+            source = BundleSource(db,f)
+            name = function.__name__
+            if name == 'kpis': return source.kpis()
+            if name == 'filter_options': return source.filters()
+            if name == 'time_series': return source.time_series(args[1] if len(args)>1 else kwargs.get('grain','month'),kwargs.get('limit',400))
+            if name == 'revenue_by_category': return source.category(kwargs.get('limit',15))
+            if name == 'orders_by_status': return source.statuses()
+            if name in {'overview','sales','orders','customers','products','sellers','delivery'}: return source.view(name)
+            raise HTTPException(422,'This metric is unavailable for the selected bundle. Select a table for generic analysis.')
         source = TabularSource(db, f)
         name = function.__name__
         if name == "kpis":

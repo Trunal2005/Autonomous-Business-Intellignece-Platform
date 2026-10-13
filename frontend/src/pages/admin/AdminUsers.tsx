@@ -196,6 +196,7 @@ export default function AdminUsers() {
           <label className="flex flex-col gap-1">
             Role
             <select
+              aria-label="New user role"
               value={newRole}
               onChange={(e) => setNewRole(e.target.value as Role)}
               className="bg-neutral-800 rounded px-3 py-1.5"

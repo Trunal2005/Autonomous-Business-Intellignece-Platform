@@ -25,7 +25,21 @@ def ml_status(db=Depends(get_db), f=Depends(analytics_filters)):
         for model in feature["models"]:
             model["compatibility"] = ml_service.compatibility(model["name"], db, f)
             model["metrics_scope"] = "Offline training/evaluation on Olist; not an evaluation of the selected dataset."
-    return {"features": features, "dataset_id": db.info["dataset"].id}
+    candidates = []
+    candidate_path = ml_service.REPO_ROOT / 'ml/candidates/abi-revenue/provenance.json'
+    if candidate_path.is_file():
+        import json
+        candidate = json.loads(candidate_path.read_text(encoding='utf-8'))
+        candidates.append({'name':'abi_gradient_boosting_revenue','status':'blocked','models':[{
+            'name':'abi_gradient_boosting_revenue','algorithm':'GradientBoostingRegressor (source candidate)',
+            'trained_at':None,
+            'artifact_available':(candidate_path.parent/'gradient_boosting_sales_model.joblib').is_file(),
+            'runtime_ready':False,'runtime_reason':'Inactive source candidate: verified training/preprocessing and provenance inputs are missing; it is not loaded in this API process.',
+            'metrics':None,'metrics_scope':'Source evaluation claims are not reproducible and are not selected-dataset metrics.',
+            'compatibility':{'compatible':False,'reasons':candidate.get('missing_evidence',[]),'contract':{},'training_domain':None},
+            'source_commit':candidate.get('source_commit'),'artifact_sha256':candidate.get('artifact_sha256')
+        }]})
+    return {"features": features, "source_candidates": candidates, "dataset_id": db.info["dataset"].id}
 
 
 @router.get("/models/{name}")

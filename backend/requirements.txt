@@ -6,6 +6,8 @@ sqlalchemy==2.0.36
 psycopg2-binary==2.9.10
 python-multipart==0.0.17
 python-dotenv==1.0.1
+# Existing optional local Ollama transport (previously declared only in dev).
+httpx==0.27.0
 
 # ML serving (loads artifacts produced by ml/ training scripts)
 joblib==1.4.2

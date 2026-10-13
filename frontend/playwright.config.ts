@@ -7,6 +7,7 @@ const frontendBase = `http://localhost:${frontendPort}`
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: '**/portability.spec.ts', // Requires the separately verified empty-database snapshot.
   timeout: 30_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

@@ -29,8 +29,8 @@ export default function Nav() {
   }
 
   return (
-    <nav className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-      <div className="flex items-center gap-4">
+    <nav className="min-w-0 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+      <div className="min-w-0 flex flex-wrap items-center gap-4">
         <span className="text-[11px] uppercase tracking-wide text-neutral-600">BI</span>
         {BI_LINKS.map((l) => (
           <Link key={l.to} to={l.to + location.search}>
@@ -40,7 +40,7 @@ export default function Nav() {
       </div>
 
       {isAdmin() && (
-        <div className="flex items-center gap-4 pl-4 border-l border-neutral-800">
+        <div className="min-w-0 flex flex-wrap items-center gap-4 sm:pl-4 sm:border-l border-neutral-800">
           <span className="text-[11px] uppercase tracking-wide text-neutral-600">Admin</span>
           {ADMIN_LINKS.map((l) => (
             <Link key={l.to} to={l.to}>

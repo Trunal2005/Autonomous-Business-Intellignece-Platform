@@ -29,4 +29,9 @@ describe('semantic analytics content', () => {
     expect(screen.queryByText('1,000')).not.toBeInTheDocument()
     expect(screen.getByText('5,000')).toBeVisible()
   })
+  it('uses mapped monetary units and semantic availability, not label guessing', () => {
+    render(<DatasetResults dashboard revenueAvailable monetaryFields={['sales']} data={{status:'available',currency_code:'USD',metric_cards:[{label:'Rows',value:2},{label:'Total sales',value:1000}]}} />)
+    expect(screen.getByText('$1,000.00')).toBeVisible()
+    expect(screen.queryByText(/Revenue unavailable/)).not.toBeInTheDocument()
+  })
 })

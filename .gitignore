@@ -57,3 +57,25 @@ Thumbs.db
 olist dataset.zip
 backend/uploads/
 .universal_work/
+
+# Private runtime files and undistributed trained artifacts, at any depth
+.env.*
+!.env.example
+**/.env
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.joblib
+*.pickle
+*.pkl
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.gguf
+**/.pytest_cache/
+**/__pycache__/

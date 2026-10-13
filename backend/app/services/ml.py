@@ -64,7 +64,23 @@ def feature_status() -> list[dict]:
             continue
         statuses = [metas[k].get("status", "planned") for k in present]
         all_available = all(s == "available" for s in statuses)
-        artifacts_ready = all(artifact_available(k) for k in present)
+        runtime = {}
+        for key in present:
+            try:
+                asset = _load_artifact(key)
+                expected = 'pipeline' if key == 'sales_prediction' else 'model'
+                if not isinstance(asset, dict) or not hasattr(asset.get(expected), 'predict') or not asset.get('features'):
+                    raise ValueError('Invalid serving bundle.')
+                if asset['features'] != metas[key].get('features_schema'):
+                    raise ValueError('Artifact feature order does not match its registered schema.')
+                if key in {'customer_segmentation','product_segmentation'} and not hasattr(asset.get('scaler'),'transform'):
+                    raise ValueError('Required trained preprocessing scaler is missing.')
+                runtime[key] = {'ready':True,'reason':None}
+            except FileNotFoundError:
+                runtime[key] = {'ready':False,'reason':'Trusted trained artifact is missing at the configured model directory.'}
+            except Exception:
+                runtime[key] = {'ready':False,'reason':'Artifact exists but its loader or serving contract failed. Check package versions and trusted artifact format.'}
+        artifacts_ready = all(runtime[k]['ready'] for k in present)
         if all_available and artifacts_ready:
             status = "available"
         elif all_available:
@@ -82,6 +98,9 @@ def feature_status() -> list[dict]:
                         "trained_at": metas[k].get("trained_at"),
                         "metrics": metas[k].get("metrics"),
                         "artifact_available": artifact_available(k),
+                        "runtime_ready": runtime[k]['ready'],
+                        "runtime_reason": runtime[k]['reason'],
+                        "version": metas[k].get('version'),
                     }
                     for k in present
                 ],
@@ -98,6 +117,8 @@ def _load_artifact(name: str):
     if not meta or not meta.get("artifact"):
         raise FileNotFoundError(f"no artifact metadata for {name}")
     path = models_dir() / meta["artifact"]
+    if Path(meta['artifact']).name != meta['artifact']:
+        raise ValueError('Artifact must be a trusted model-directory filename.')
     if not path.exists():
         raise FileNotFoundError(f"artifact missing: {path}")
     return joblib.load(path)
@@ -108,17 +129,26 @@ def forecast(periods: int = 30, target: str = "orders", db=None, f=None) -> dict
     import numpy as np
     import pandas as pd
 
-    bundle = _load_artifact(f"sales_forecast_{target}")
-    model, feature_cols = bundle["model"], bundle["features"]
-
+    if target not in {"orders", "revenue"} or not 1 <= periods <= 90:
+        raise ValueError("Invalid forecast target or horizon.")
     if db is None:
         raise ValueError("Dataset context is required for inference.")
     from app.analytics import metrics
     from app.analytics.filters import Filters
     points = metrics.time_series(db, f or Filters(), "day", limit=100_000)
+    if len(points) < 30:
+        raise ValueError("Forecasting requires at least 30 daily observations.")
     series = pd.DataFrame(points).rename(columns={"period": "date"})
     series["date"] = pd.to_datetime(series["date"])
+    series = series.sort_values("date")
     hist = series.set_index("date")[target].astype(float).copy()
+    dates = hist.index[-30:]
+    if hist.index.has_duplicates or not ((dates[1:] - dates[:-1]).days == 1).all():
+        raise ValueError("Forecast history must contain consecutive daily observations.")
+    if not np.isfinite(hist.to_numpy()).all():
+        raise ValueError("Forecast history contains non-finite values.")
+    bundle = _load_artifact(f"sales_forecast_{target}")
+    model, feature_cols = bundle["model"], bundle["features"]
     last_date = hist.index.max()
     values = list(hist.values)
 
@@ -135,6 +165,8 @@ def forecast(periods: int = 30, target: str = "orders", db=None, f=None) -> dict
         }
         row = pd.DataFrame([[feats[c] for c in feature_cols]], columns=feature_cols)
         yhat = float(model.predict(row)[0])
+        if not np.isfinite(yhat):
+            raise ValueError("Model returned a non-finite prediction.")
         values.append(yhat)
         preds.append({"date": (last_date + pd.Timedelta(days=step + 1)).strftime("%Y-%m-%d"), target: round(yhat, 2)})
     return {"history_tail": [{"date": d.strftime("%Y-%m-%d"), target: float(v)} for d, v in list(hist.items())[-30:]], "forecast": preds}
@@ -168,7 +200,12 @@ def customer_segments(db=None, f=None) -> dict:
         from sqlalchemy import text
         ds = db.info["dataset"]
         f = f or Filters()
-        if ds.adapter == "tabular":
+        if getattr(ds,'source_type',None) == 'bundle':
+            from app.analytics.bundle import BundleSource
+            source = BundleSource(db,f)
+            customer=source.customer; order=source.oc['order_id']; date=source.oc['order_purchase_timestamp']; amount=source.amount
+            rows=source.rows(source.statement(customer.label('customer'),func.max(date).label('last_purchase'),func.count(func.distinct(order)).label('frequency'),func.sum(amount).label('monetary')).where(customer.is_not(None),date.is_not(None),amount.is_not(None)).group_by(customer))
+        elif ds.adapter == "tabular":
             source = TabularSource(db, f)
             customer, order, date, amount = (source.field(r) for r in ("customer", "order", "date", "revenue"))
             rows = source.rows(source.statement(customer.label("customer"), func.max(date).label("last_purchase"),
@@ -204,7 +241,13 @@ def product_segments(db, f) -> dict:
     features = bundle["features"]
 
     ds = db.info.get("dataset")
-    if ds is not None and ds.adapter == "tabular":
+    if ds is not None and getattr(ds,'source_type',None) == 'bundle':
+        from app.analytics.bundle import BundleSource
+        from sqlalchemy import func
+        source=BundleSource(db,f)
+        ic,pc=source.ic,source.pc
+        df=pd.DataFrame(source.rows(source.item_statement(ic['product_id'].label('product'),func.min(pc['product_category_name']).label('category'),func.count().label('total_qty'),func.sum(ic['price']).label('total_revenue'),func.avg(ic['price']).label('avg_price'),func.avg(pc['product_weight_g']).label('product_weight_g')).group_by(ic['product_id'])))
+    elif ds is not None and ds.adapter == "tabular":
         from app.analytics.tabular import TabularSource
         from sqlalchemy import func
         source = TabularSource(db, f)
@@ -329,7 +372,28 @@ def compatibility(name, db, f=None):
     reasons = []
     if not contract:
         reasons.append("No verified inference contract is registered for this model.")
-    if ds.adapter == "tabular":
+    if getattr(ds,'source_type',None) == 'bundle':
+        from app.analytics.bundle import BundleSource
+        source=BundleSource(db,f)
+        roles={'date','order'}
+        if source.amount is not None: roles.update({'revenue','price','quantity','product','seller'})
+        if source.enabled('orders','customers'): roles.update({'customer','location'})
+        if source.pc: roles.add('category')
+        if 'product_weight_g' in source.pc and next(c['dtype'] for c in source.tables['products'][0].profile['columns'] if c['name']=='product_weight_g')=='numeric': roles.add('weight_g')
+        for role in contract.get('required_semantics',[]):
+            if role not in roles: reasons.append(f'Missing validated {role} relationship or field. Review bundle relationships or select a compatible table.')
+        if contract.get('currency_code') and ds.semantics.get('currency_code')!=contract['currency_code']:
+            reasons.append(f"This trained model requires confirmed {contract['currency_code']} monetary units. Confirm bundle currency in Dataset Manager.")
+        if ds.semantics.get('domain') not in {'commerce','transactions'}:
+            reasons.append('Confirm the commerce domain in Dataset Manager.')
+        required=contract.get('required_semantics',[])
+        checks=[('date','orders','order_purchase_timestamp'),('customer','customers','customer_unique_id'),('price','items','price'),('revenue','items','price'),('weight_g','products','product_weight_g')]
+        for role,table,column in checks:
+            if role in required and table in source.tables:
+                profile=next((c for c in source.tables[table][0].profile['columns'] if c['name']==column),None)
+                if profile and profile['missing'] and role!='weight_g': reasons.append(f'Required {role} contains missing values. Review table quality before inference.')
+                if profile and profile.get('statistics',{}).get('min',0)<0: reasons.append(f'Required {role} contains negative values outside the trained contract.')
+    elif ds.adapter == "tabular":
         from app.analytics.tabular import TabularSource
         source = TabularSource(db, f)
         for role in contract.get("required_semantics", []):
@@ -353,12 +417,15 @@ def compatibility(name, db, f=None):
             points = metrics.time_series(db, f or Filters(), "day", limit=100_000)
             if len(points) < contract.get("minimum_observations", 1):
                 reasons.append(f"At least {contract.get('minimum_observations')} daily observations are required after filtering.")
-            elif ds.adapter == "tabular":
+            else:
                 dates = pd.to_datetime([p["period"] for p in points][-30:])
                 if len(dates) > 1 and not ((dates[1:] - dates[:-1]).days == 1).all():
                     reasons.append("The latest 30 daily observations must be consecutive; missing days cannot be assumed to be zero.")
         else:
-            if ds.adapter == "star_schema":
+            if getattr(ds,'source_type',None) == 'bundle':
+                from sqlalchemy import func
+                n=db.scalar(__import__('sqlalchemy').select(func.count()).select_from(source.order_ids().subquery()))
+            elif ds.adapter == "star_schema":
                 from app.analytics.filters import order_from, order_where
                 from sqlalchemy import text
                 where, params = order_where(f or Filters())

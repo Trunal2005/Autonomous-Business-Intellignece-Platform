@@ -4,13 +4,17 @@ const nav = [
   { name: 'Metrics', path: '/ml/metrics' },
   { name: 'Product Segmentation', path: '/ml/product-segmentation' },
   { name: 'Revenue Forecast', path: '/ml/revenue-forecast' },
+  { name: 'Order Forecast', path: '/ml/order-forecast' },
+  { name: 'Customer Segments', path: '/ml/customer-segments' },
+  { name: 'Anomaly Detection', path: '/ml/anomalies' },
+  { name: 'Sales Prediction', path: '/ml/sales-prediction' },
 ]
 
 export default function MlLayout() {
   const location = useLocation()
   return (
     <div className="space-y-6">
-      <div className="flex space-x-6 border-b border-neutral-800 text-sm">
+      <div className="flex flex-wrap gap-x-6 gap-y-3 border-b border-neutral-800 text-sm">
         {nav.map((n) => (
           <NavLink
             key={n.name}

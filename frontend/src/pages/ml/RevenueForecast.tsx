@@ -17,7 +17,9 @@ import FilterBar from '@/components/FilterBar'
 const fmtMoney = (n: number) =>
   `R$ ${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 
-export default function RevenueForecast() {
+export default function RevenueForecast({ target = 'revenue' }: { target?: 'orders' | 'revenue' }) {
+  const label = target === 'revenue' ? 'Revenue' : 'Orders'
+  const fmtValue = target === 'revenue' ? fmtMoney : (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
   const { filters } = useFilters()
   const [reason, setReason] = useState<string | null>(null)
   const [history, setHistory] = useState<ForecastPoint[]>([])
@@ -29,7 +31,7 @@ export default function RevenueForecast() {
     let current = true
     setState('loading')
     setReason(null)
-    getForecast(horizon, 'revenue', filters)
+    getForecast(horizon, target, filters)
       .then((res) => {
         if (!current) return
         if (res.status === 'not_applicable') { setReason(res.reason || 'Model requirements are not satisfied.'); setState('ready'); setHistory([]); setForecast([]); return }
@@ -39,30 +41,31 @@ export default function RevenueForecast() {
       })
       .catch(e => { if (current) { setReason(e.message); setState('error') } })
     return () => { current = false }
-  }, [horizon, filters])
+  }, [horizon, target, filters])
 
   const forecastData = [
-    ...history.map((p) => ({ date: p.date, historical: p.revenue, forecast: null as number | null })),
-    ...forecast.map((p) => ({ date: p.date, historical: null as number | null, forecast: p.revenue })),
+    ...history.map((p) => ({ date: p.date, historical: p[target], forecast: null as number | null })),
+    ...forecast.map((p) => ({ date: p.date, historical: null as number | null, forecast: p[target] })),
   ]
 
-  const totalForecastRevenue = forecast.reduce((acc, p) => acc + (p.revenue || 0), 0)
+  const totalForecastRevenue = forecast.reduce((acc, p) => acc + (p[target] || 0), 0)
   const avgForecastRevenue = forecast.length > 0 ? totalForecastRevenue / forecast.length : 0
-  const latestHistorical = history.length > 0 ? history[history.length - 1].revenue || 0 : 0
+  const latestHistorical = history.length > 0 ? history[history.length - 1][target] || 0 : 0
 
   return (
     <div className="space-y-6">
       <FilterBar />
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-2xl font-semibold">Revenue Forecast</h1>
+          <h1 className="text-2xl font-semibold">{target === 'revenue' ? 'Revenue' : 'Order'} Forecast</h1>
           <p className="text-sm text-neutral-500">
-            Machine Learning (Linear Regression) predictive forecast of daily revenue, trained on lag and rolling historical features.
+            Machine Learning (Linear Regression) predictive forecast of daily {target}, trained on lag and rolling historical features.
           </p>
         </div>
         <div className="bg-neutral-900 border border-neutral-800 rounded px-3 py-1.5 flex items-center gap-2">
           <label className="text-sm text-neutral-400">Horizon:</label>
           <select
+            aria-label="Forecast horizon"
             value={horizon}
             onChange={(e) => setHorizon(Number(e.target.value))}
             className="bg-transparent text-sm text-neutral-200 outline-none"
@@ -88,22 +91,22 @@ export default function RevenueForecast() {
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KpiCard
-              label="Latest Actual Revenue"
-              value={fmtMoney(latestHistorical)}
+              label={`Latest Actual ${label}`}
+              value={fmtValue(latestHistorical)}
             />
             <KpiCard
               label={`Forecast Average (${horizon}d)`}
-              value={fmtMoney(avgForecastRevenue)}
+              value={fmtValue(avgForecastRevenue)}
             />
             <KpiCard
               label={`Forecast Total (${horizon}d)`}
-              value={fmtMoney(totalForecastRevenue)}
+              value={fmtValue(totalForecastRevenue)}
             />
           </div>
 
           <div className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="font-medium">Historical Actuals vs Predicted Revenue</h2>
+              <h2 className="font-medium">Historical Actuals vs Predicted {label}</h2>
               <div className="text-xs text-neutral-500 bg-neutral-800/50 px-2 py-1 rounded">
                 Model: Linear Regression (Daily)
               </div>
@@ -116,11 +119,11 @@ export default function RevenueForecast() {
                 <YAxis
                   stroke="#666"
                   fontSize={11}
-                  tickFormatter={(v) => `R$${Math.round(v / 1000)}k`}
+                  tickFormatter={(v) => target === 'revenue' ? `R$${Math.round(v / 1000)}k` : fmtValue(v)}
                 />
                 <Tooltip
                   contentStyle={{ background: '#171717', border: '1px solid #333' }}
-                  formatter={(val: number, name: string) => [fmtMoney(val), name === 'historical' ? 'Actual Revenue' : 'Predicted Revenue']}
+                  formatter={(val: number, name: string) => [fmtValue(val), `${name === 'historical' ? 'Actual' : 'Predicted'} ${label}`]}
                 />
                 <Legend iconType="circle" />
                 <Line
@@ -155,14 +158,14 @@ export default function RevenueForecast() {
                 <thead className="text-neutral-500 text-xs uppercase sticky top-0 bg-neutral-900 border-b border-neutral-800">
                   <tr>
                     <th className="text-left py-2 px-4">Date</th>
-                    <th className="text-right py-2 px-4">Predicted Revenue</th>
+                    <th className="text-right py-2 px-4">Predicted {label}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {forecast.map((p) => (
                     <tr key={p.date} className="border-b border-neutral-800/30 hover:bg-neutral-800/50">
                       <td className="py-2 px-4 text-neutral-300 font-mono">{p.date}</td>
-                      <td className="py-2 px-4 text-right font-mono text-amber-400">{fmtMoney(p.revenue || 0)}</td>
+                      <td className="py-2 px-4 text-right font-mono text-amber-400">{fmtValue(p[target] || 0)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -174,3 +177,5 @@ export default function RevenueForecast() {
     </div>
   )
 }
+
+export function OrderForecast() { return <RevenueForecast target="orders" /> }
