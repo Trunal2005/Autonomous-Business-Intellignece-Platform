@@ -8,6 +8,38 @@ const limits = { max_bytes: 209715200, max_expanded_bytes:536870912, bundle_max_
 beforeEach(() => { vi.mocked(getUploadLimits).mockResolvedValue(limits); vi.mocked(getZipManifest).mockResolvedValue({files:[{path:'a.csv',bytes:3}],total_bytes:3}) })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 describe('bundle input and manifest', () => {
+  it('keeps the 200 MiB boundary and lets the user explicitly select one nested CSV set', async () => {
+    const files=['root/current/orders.csv','root/current/items.csv','root/backup/current/orders.csv','root/backup/current/items.csv'].map(path => {
+      const file=new File(['a\n1'],path.split('/').pop()!);Object.defineProperty(file,'webkitRelativePath',{value:path});Object.defineProperty(file,'size',{value:60*1024*1024});return file
+    })
+    render(<BundleUpload saved={async()=>{}} />)
+    fireEvent.change(screen.getByLabelText('Dataset folder'),{target:{files}})
+    await waitFor(()=>expect(screen.getByText(/240.00 MiB exceeds 200.00 MiB/)).toBeVisible())
+    expect(screen.getByRole('button',{name:'Confirm bundle import'})).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('CSV folder to import'),{target:{value:'root/current'}})
+    expect(screen.getByText(/2 files excluded by your folder choice/)).toBeVisible()
+    expect(screen.getByText(/2 files · 120.00 MiB/)).toBeVisible()
+    expect(screen.getByRole('button',{name:'Confirm bundle import'})).toBeEnabled()
+    expect(uploadDatasetBundle).not.toHaveBeenCalled()
+  })
+  it('accepts exactly the configured payload size and rejects one byte above without allocating a large file',async()=>{
+    const file=new File(['a\n1'],'orders.csv');Object.defineProperty(file,'size',{value:limits.max_bytes,configurable:true})
+    render(<BundleUpload saved={async()=>{}} />)
+    fireEvent.change(screen.getByLabelText('Dataset folder'),{target:{files:[file]}})
+    await waitFor(()=>expect(screen.getByRole('button',{name:'Confirm bundle import'})).toBeEnabled())
+    Object.defineProperty(file,'size',{value:limits.max_bytes+1});fireEvent.change(screen.getByLabelText('Dataset folder'),{target:{files:[file]}})
+    expect(screen.getByRole('button',{name:'Confirm bundle import'})).toBeDisabled()
+  })
+  it('reports persisted import separately from a registry refresh failure',async()=>{
+    vi.mocked(uploadDatasetBundle).mockResolvedValue({dataset_id:'bundle',tables:[{}]} as never)
+    render(<BundleUpload saved={async()=>{throw new Error('offline')}} />)
+    fireEvent.change(screen.getByLabelText('Dataset folder'),{target:{files:[new File(['a\n1'],'a.csv')]}})
+    await waitFor(()=>expect(screen.getByRole('button',{name:'Confirm bundle import'})).toBeEnabled())
+    fireEvent.click(screen.getByRole('button',{name:'Confirm bundle import'}))
+    await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Import succeeded'))
+    expect(screen.getByText(/Imported 1 separate tables/)).toBeVisible()
+    expect(screen.queryByRole('button',{name:'Confirm bundle import'})).not.toBeInTheDocument()
+  })
   it('provides a real directory input and ZIP fallback', async () => {
     render(<BundleUpload saved={async () => {}} />)
     expect(screen.getByLabelText('Dataset folder')).toHaveAttribute('webkitdirectory')

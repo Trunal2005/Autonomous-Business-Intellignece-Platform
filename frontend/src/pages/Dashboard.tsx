@@ -1,4 +1,6 @@
 import DatasetResults from '@/components/DatasetResults'
+import BusinessEvidence from '@/components/BusinessEvidence'
+import ExecutiveOutlook from '@/components/ExecutiveOutlook'
 import { useEffect, useState } from 'react'
 import {
   LineChart,
@@ -21,15 +23,19 @@ import FilterBar from '@/components/FilterBar'
 import { KpiCard } from '@/components/KpiCard'
 import { fmtMoney } from '@/services/format'
 import { useDataset } from '@/hooks/useDataset'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
+import { PageHeader, StatusBadge } from '@/components/ui/Workspace'
+import { Icon } from '@/components/ui/Icon'
 
-const COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316']
+const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)']
 
 export default function Dashboard() {
+  const location = useLocation()
   const { filters, resetFilters } = useFilters()
   const { active, datasets } = useDataset()
   const activeId = active?.dataset_id
   const [retry, setRetry] = useState(0)
+  const [refreshedAt, setRefreshedAt] = useState<string | null>(null)
   const [data, setData] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -43,6 +49,7 @@ export default function Dashboard() {
       .then((res) => {
         if (!current) return
         setData(res)
+        setRefreshedAt(new Date().toLocaleString())
         setState('ready')
       })
       .catch(e => { if (current) { setError(e.message); setState('error') } })
@@ -54,7 +61,7 @@ export default function Dashboard() {
   if (state === 'error') {
     return (
       <div className="border border-red-900 bg-red-950/20 rounded-xl p-6 space-y-3" role="alert">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
+        <PageHeader title="Dashboard" />
         <p>{error || 'Could not load data.'}</p>
         <button className="px-4 py-2 bg-neutral-800 rounded" onClick={() => setRetry(r => r + 1)}>Retry dashboard</button>
         <Link to="/datasets" className="block text-blue-400">Choose a dataset in Dataset Manager</Link>
@@ -67,7 +74,10 @@ export default function Dashboard() {
       return <div role="status" className="space-y-4"><p className="text-neutral-400">Loading dataset metrics...</p><div className="grid grid-cols-2 lg:grid-cols-4 gap-4 animate-pulse">{[1, 2, 3, 4].map(i => <div key={i} className="h-28 rounded-xl bg-neutral-900 border border-neutral-800" />)}</div></div>
     }
 
-    if ('metric_cards' in data) return <div className="space-y-4">{data.revenue_definition && <div className="border border-neutral-800 rounded-xl p-4 text-sm space-y-2"><p>{data.revenue_definition}</p><p>Currency: {data.currency_code || 'Unconfirmed — confirm in Dataset Manager'}. Grain: orders. Every metric uses the current filters.</p><p>Missing values: {active.tables?.reduce((n,t) => n+(t.quality.missing_values || 0),0).toLocaleString()}. Tables: {active.tables?.length}. Uploaded record provenance is unverified.</p><details><summary>Validated relationships and data coverage</summary>{data.relationships?.relationships?.map((r: any,i: number) => <p key={i}>{r.from_table} → {r.to_table}: {r.enabled ? 'Enabled' : r.reason} · unmatched {r.unmatched_rows ?? 'not applicable'} · null keys {r.null_keys ?? 'not applicable'}</p>)}</details></div>}<DatasetResults data={data} dashboard revenueAvailable={!!active?.semantics.fields?.revenue} monetaryFields={active.tables ? ['Item revenue','Average order value','Payment total'] : [active?.semantics.fields?.revenue, active?.semantics.fields?.currency, active?.semantics.fields?.price].filter((field): field is string => !!field)} /></div>
+    if ('metric_cards' in data) return <div className="space-y-5">
+      <DatasetResults data={data} dashboard revenueAvailable={!!active?.semantics.fields?.revenue} monetaryFields={active.tables ? ['Item revenue','Average order value','Payment total'] : [active?.semantics.fields?.revenue, active?.semantics.fields?.currency, active?.semantics.fields?.price].filter((field): field is string => !!field)} />
+      {data.revenue_definition && <details className="abi-panel p-4"><summary>Metric definitions and validated relationships</summary><div className="text-xs text-neutral-400 space-y-2 pt-3"><p>{data.revenue_definition}</p><p>Currency: {data.currency_code || 'Unconfirmed — confirm in Dataset Manager'}. Grain: orders. Every metric uses the current filters.</p><p>Missing values: {active.tables?.reduce((n,t) => n+(t.quality.missing_values || 0),0).toLocaleString()}. Tables: {active.tables?.length}. Uploaded record provenance is unverified.</p>{data.relationships?.relationships?.map((r: any,i: number) => <p key={i}>{r.from_table} → {r.to_table}: {r.enabled ? 'Enabled' : r.reason} · unmatched {r.unmatched_rows ?? 'not applicable'} · null keys {r.null_keys ?? 'not applicable'}</p>)}</div></details>}
+    </div>
 
     const { kpis, revenue_series, revenue_by_category, orders_by_status, top_customer_states, delivery } = data
 
@@ -76,6 +86,9 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           <KpiCard label="Total Revenue" value={fmtMoney(kpis.total_revenue)} hint="Sum of item prices" />
           <KpiCard label="Total Orders" value={kpis.total_orders.toLocaleString()} />
+          <KpiCard label="Units Sold" value={kpis.items_sold.toLocaleString()} hint="Qualifying item rows; independent of distinct order count." />
+          <KpiCard label="Total Profit" value="Unavailable" hint="No validated cost/profit fields in this warehouse." />
+          <KpiCard label="Profit Margin" value="Unavailable" hint="Requires validated profit and revenue." />
           <KpiCard label="Unique Customers" value={kpis.unique_customers.toLocaleString()} />
           <KpiCard label="Products Sold" value={kpis.products_sold.toLocaleString()} />
           <KpiCard label="Active Sellers" value={kpis.active_sellers.toLocaleString()} />
@@ -85,19 +98,19 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800">
+          <div className="abi-panel p-4 rounded-lg border border-neutral-800">
             <h2 className="mb-3 font-medium">Revenue Over Time</h2>
             {revenue_series && revenue_series.length > 0 ? (
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={revenue_series}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-                  <XAxis dataKey="period" stroke="#666" fontSize={11} />
-                  <YAxis stroke="#666" fontSize={11} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
+                  <XAxis dataKey="period" stroke="rgb(var(--muted))" fontSize={11} />
+                  <YAxis stroke="rgb(var(--muted))" fontSize={11} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
                   <Tooltip
                     formatter={(v: number) => fmtMoney(v)}
-                    contentStyle={{ background: '#171717', border: '1px solid #333' }}
+                    contentStyle={{ background: 'rgb(var(--surface-raised))', border: '1px solid rgb(var(--border))' }}
                   />
-                  <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="revenue" stroke="var(--chart-1)" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
@@ -105,16 +118,16 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800">
+          <div className="abi-panel p-4 rounded-lg border border-neutral-800">
             <h2 className="mb-3 font-medium">Orders Over Time</h2>
             {revenue_series && revenue_series.length > 0 ? (
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={revenue_series}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-                  <XAxis dataKey="period" stroke="#666" fontSize={11} />
-                  <YAxis stroke="#666" fontSize={11} />
-                  <Tooltip contentStyle={{ background: '#171717', border: '1px solid #333' }} />
-                  <Line type="monotone" dataKey="orders" stroke="#22c55e" strokeWidth={2} dot={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
+                  <XAxis dataKey="period" stroke="rgb(var(--muted))" fontSize={11} />
+                  <YAxis stroke="rgb(var(--muted))" fontSize={11} />
+                  <Tooltip contentStyle={{ background: 'rgb(var(--surface-raised))', border: '1px solid rgb(var(--border))' }} />
+                  <Line type="monotone" dataKey="orders" stroke="var(--chart-2)" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
@@ -122,19 +135,19 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800">
+          <div className="abi-panel p-4 rounded-lg border border-neutral-800">
             <h2 className="mb-3 font-medium">Revenue by Category (Top 10)</h2>
             {revenue_by_category && revenue_by_category.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={revenue_by_category.slice(0, 10)} layout="vertical" margin={{ left: 80 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" horizontal={false} />
-                  <XAxis type="number" stroke="#666" fontSize={11} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                  <YAxis type="category" dataKey="category" stroke="#666" fontSize={10} width={80} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" horizontal={false} />
+                  <XAxis type="number" stroke="rgb(var(--muted))" fontSize={11} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                  <YAxis type="category" dataKey="category" stroke="rgb(var(--muted))" fontSize={10} width={80} />
                   <Tooltip
                     formatter={(v: number) => fmtMoney(v)}
-                    contentStyle={{ background: '#171717', border: '1px solid #333' }}
+                    contentStyle={{ background: 'rgb(var(--surface-raised))', border: '1px solid rgb(var(--border))' }}
                   />
-                  <Bar dataKey="revenue" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="revenue" fill="var(--chart-1)" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -143,7 +156,7 @@ export default function Dashboard() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800 flex flex-col">
+            <div className="abi-panel p-4 rounded-lg border border-neutral-800 flex flex-col">
               <h2 className="mb-3 font-medium">Order Status</h2>
               <div className="flex-1 flex items-center justify-center">
                 {orders_by_status && orders_by_status.length > 0 ? (
@@ -163,7 +176,7 @@ export default function Dashboard() {
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip contentStyle={{ background: '#171717', border: '1px solid #333' }} />
+                      <Tooltip contentStyle={{ background: 'rgb(var(--surface-raised))', border: '1px solid rgb(var(--border))' }} />
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
@@ -172,7 +185,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800">
+            <div className="abi-panel p-4 rounded-lg border border-neutral-800">
               <h2 className="mb-3 font-medium">Top States (Customers)</h2>
               <div className="space-y-3">
                 {top_customer_states?.slice(0, 5).map((s: any) => (
@@ -193,17 +206,27 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border border-neutral-800 bg-gradient-to-br from-blue-950/40 via-neutral-900 to-neutral-950 p-6 sm:p-8">
-        <div className="flex flex-wrap justify-between gap-4"><div><p className="text-xs uppercase tracking-widest text-blue-400 mb-2">Business intelligence overview</p><h1 className="text-3xl font-semibold">Dashboard</h1><p className="mt-2 text-sm text-neutral-400">Explore observed performance, current filters and data quality.</p></div><Link className="self-start border border-neutral-600 px-4 py-2 rounded-lg text-sm" to="/datasets">Change data source</Link></div>
-        <div className="mt-5 flex flex-wrap gap-3 text-sm"><span className="rounded-full bg-neutral-800 px-3 py-1">{active?.bundle_id ? datasets.find(d => d.dataset_id === active.bundle_id)?.dataset_name : active?.dataset_name || 'No selected dataset'}</span>{active?.bundle_id && <span className="rounded-full bg-blue-950 px-3 py-1 break-all">Table: {active.relative_path || active.dataset_name}</span>}<span className="text-emerald-400 px-2 py-1">{active?.status || 'Select a source'}</span></div>
+    <div className="space-y-6 abi-dashboard">
+      <div>
+        <PageHeader title="Dashboard" eyebrow="01 / Performance overview" description="The numbers that matter, grounded in your selected data." action={<Link className="abi-button" to="/datasets"><Icon name="data" size={15} />Change data source</Link>} />
+        <div className="abi-dashboard-context"><StatusBadge>{active?.bundle_id ? datasets.find(d => d.dataset_id === active.bundle_id)?.dataset_name : active?.dataset_name || 'No selected dataset'}</StatusBadge>{active?.bundle_id && <StatusBadge>Table: {active.relative_path || active.dataset_name}</StatusBadge>}<StatusBadge tone={active?.status === 'READY' ? 'success' : 'neutral'}>{active?.status || 'Select a source'}</StatusBadge></div>
         {active?.bundle_id && <p className="mt-3 text-xs text-neutral-400">Analysis grain: rows in the selected table. Cross-table joins are unavailable; no totals are combined across tables.</p>}
       </div>
-      <FilterBar showGrain={false} />
+      <div className="flex flex-wrap justify-between gap-3 text-xs text-neutral-400"><span>{state === 'loading' ? 'Refreshing selected metrics…' : refreshedAt ? `Metrics last refreshed: ${refreshedAt}` : 'No successful metric refresh yet'}</span><button className="text-blue-400" disabled={state === 'loading'} onClick={()=>setRetry(value=>value+1)}>Refresh metrics</button></div>
+      <FilterBar />
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-400" aria-label="Active filter summary"><span>{Object.keys(filters).length ? `Active filters: ${Object.entries(filters).map(([k, v]) => `${k.replace(/_/g, ' ')} = ${v}`).join(' · ')}` : 'All available records · no active filters'}</span>{Object.keys(filters).length > 0 && <button onClick={resetFilters} className="text-blue-400">Clear all filters</button>}</div>
-      {active && <div className="grid sm:grid-cols-3 gap-3"><div className="border border-neutral-800 rounded-xl p-4"><p className="text-xs uppercase text-neutral-500">Source volume</p><p className="mt-2 font-semibold">{active.tables ? `${active.row_count.toLocaleString()} source rows · ${active.tables.length} tables · ${active.column_count} table columns` : `${active.row_count.toLocaleString()} rows · ${active.column_count} fields`}</p><p className="text-xs text-neutral-500 mt-1">{active.tables ? 'All separate tables before filters; repeated keys are not business totals' : 'Whole table before filters'}</p></div><div className="border border-neutral-800 rounded-xl p-4"><p className="text-xs uppercase text-neutral-500">Profile quality</p><p className="mt-2">{active.quality.missing_values ?? 'Unknown'} missing values · {active.quality.duplicate_rows ?? 'Unknown'} duplicate rows</p><p className="text-xs text-neutral-500 mt-1">{active.tables ? 'Sum of per-table profiles; duplicates are retained' : 'Whole-table profile; duplicates are retained'}</p></div><div className="border border-neutral-800 rounded-xl p-4"><p className="text-xs uppercase text-neutral-500">Monetary units</p><p className="mt-2">{active.semantics.currency_code || 'Currency unconfirmed'}</p><p className="text-xs text-neutral-500 mt-1">Values retain source units; no conversion</p></div></div>}
       {active?.quality.warnings?.length ? <div className="border border-amber-900/60 bg-amber-950/20 rounded-xl p-4 text-sm text-amber-300">{active.quality.warnings.map(w => <p key={w}>{w}</p>)}</div> : null}
       {renderContent()}
+      {state === 'ready' && data && <>
+        {!!data.product_highlights?.by_revenue?.length && <section className="abi-panel p-5"><h2 className="font-medium">Product performance highlights</h2><p className="text-xs text-neutral-400 mb-4">Top five products per measure · qualifying item prices and item counts · {data.currency_code || 'currency unconfirmed'}. No payments/reviews fan-out.</p><div className="grid lg:grid-cols-2 gap-5">{[['by_revenue','Top products by item revenue','revenue'],['by_quantity','Top products by units sold','quantity']].map(([key,title,value])=><div key={key}><h3>{title}</h3><div className="overflow-auto"><table className="w-full text-sm"><thead><tr><th className="text-left">Product key</th><th className="text-right">{value === 'revenue' ? 'Product revenue' : 'Units'}</th></tr></thead><tbody>{data.product_highlights[key].map((row:any)=><tr key={row.product} className="border-t border-neutral-800"><td className="py-2 break-all">{row.product}</td><td className="text-right">{row[value] == null ? 'Unavailable' : row[value].toLocaleString('en-US',{maximumFractionDigits:2})}</td></tr>)}</tbody></table></div></div>)}</div><Link className="text-blue-400 text-sm" to={'/analytics/products'+location.search}>Open detailed product analysis →</Link></section>}
+        <BusinessEvidence domain="revenue" compact />
+        {(active.source_type === 'bundle' && active.relational_analysis?.supported || active.source_type === 'warehouse') && <div className="grid xl:grid-cols-2 gap-6"><BusinessEvidence domain="customers" compact /><BusinessEvidence domain="sellers" compact /></div>}
+        <ExecutiveOutlook />
+        <nav className="abi-panel p-4 flex flex-wrap gap-4 text-sm" aria-label="Investigate business performance">{['sales','products','customers','delivery','sellers'].map(section=><Link key={section} className="text-blue-400 capitalize" to={'/analytics/'+section+location.search}>{section} details →</Link>)}<Link className="text-blue-400" to={'/ml/metrics'+location.search}>Full forecast and model evidence →</Link></nav>
+      </>}
+      <section className="abi-dashboard-quality"><p className="abi-eyebrow">Source context / before filters</p>
+      {active && <div className="grid sm:grid-cols-3 gap-3"><div className="border border-neutral-800 rounded-xl p-4"><p className="text-xs uppercase text-neutral-500">Source volume</p><p className="mt-2 font-semibold">{active.tables ? `${active.row_count.toLocaleString()} source rows · ${active.tables.length} tables · ${active.column_count} table columns` : `${active.row_count.toLocaleString()} rows · ${active.column_count} fields`}</p><p className="text-xs text-neutral-500 mt-1">{active.tables ? 'All separate tables before filters; repeated keys are not business totals' : 'Whole table before filters'}</p></div><div className="border border-neutral-800 rounded-xl p-4"><p className="text-xs uppercase text-neutral-500">Profile quality</p><p className="mt-2">{active.quality.missing_values ?? 'Unknown'} missing values · {active.quality.duplicate_rows ?? 'Unknown'} duplicate rows</p><p className="text-xs text-neutral-500 mt-1">{active.tables ? 'Sum of per-table profiles; duplicates are retained' : 'Whole-table profile; duplicates are retained'}</p></div><div className="border border-neutral-800 rounded-xl p-4"><p className="text-xs uppercase text-neutral-500">Monetary units</p><p className="mt-2">{active.semantics.currency_code || 'Currency unconfirmed'}</p><p className="text-xs text-neutral-500 mt-1">Values retain source units; no conversion</p></div></div>}
+      </section>
     </div>
   )
 }

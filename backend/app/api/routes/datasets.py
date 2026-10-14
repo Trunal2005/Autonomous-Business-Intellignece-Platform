@@ -25,6 +25,8 @@ def dataset_context(request: Request, db=Depends(get_db), user=Depends(require_b
         raise HTTPException(422, "Conflicting dataset identifiers.")
     allowed = {"dataset_id", "date_from", "date_to", "category", "customer_state", "seller_state", "order_status",
                "payment_type", "review_score", "column_filters", "grain", "limit", "periods", "target", "report"}
+    if request.url.path == '/api/analytics/business':
+        allowed.add('domain')
     if any(k not in allowed for k in request.query_params):
         raise HTTPException(422, "An unsupported dataset query parameter was supplied.")
     if "grain" in request.query_params:

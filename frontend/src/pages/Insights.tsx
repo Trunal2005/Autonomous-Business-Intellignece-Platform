@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/ui/Workspace'
 import { useEffect, useRef, useState } from 'react'
 import { getRequestContext, queryInsights, type InsightsResponse } from '@/services/api'
 import { useFilters } from '@/hooks/useFilters'
@@ -47,12 +48,12 @@ export default function Insights() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-none">
       <div>
-        <h1 className="text-2xl font-semibold">AI Business Insights</h1>
+        <PageHeader title="AI Business Insights" />
         <p className="text-sm text-neutral-500">
-          Answers are grounded strictly in warehouse data via controlled tools. If no LLM is
-          configured, a deterministic data summary is returned.
+          Numerical answers use the selected dataset and current filters. Optional local
+          language generation adds explanations when available.
         </p>
       </div>
 
@@ -69,7 +70,7 @@ export default function Insights() {
           value={question}
           onChange={(e) => { generation.current += 1; setResult(null); setError(null); setBusy(false); setQuestion(e.target.value) }}
           rows={3}
-          className="w-full bg-neutral-900/60 border border-neutral-800 rounded-lg p-3 text-sm"
+          className="w-full abi-panel border border-neutral-800 rounded-lg p-3 text-sm"
           placeholder="Ask about KPIs, categories, orders, or model status…"
         />
         <div className="flex flex-wrap gap-2">
@@ -99,7 +100,7 @@ export default function Insights() {
       {error && <div className="text-red-400 text-sm">{error}</div>}
 
       {result && (
-        <div className="bg-neutral-900/60 border border-neutral-800 rounded-lg p-4 space-y-3">
+        <div className="abi-panel border border-neutral-800 rounded-lg p-4 space-y-3">
           <div className="flex items-center gap-3 text-xs">
             <span className="uppercase text-neutral-500">status: {result.status}</span>
             {result.provider && <span className="text-neutral-500">provider: {result.provider}</span>}

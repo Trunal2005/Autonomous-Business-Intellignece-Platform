@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/ui/Workspace'
 import { useState } from 'react'
 import { downloadReport } from '@/services/api'
 import { getStoredUser } from '@/services/auth'
@@ -28,15 +29,15 @@ export default function Reports() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-none">
       <div>
-        <h1 className="text-2xl font-semibold">Reports</h1>
+        <PageHeader title="Reports" />
         <p className="text-sm text-neutral-500">
-          Export warehouse data as CSV. All reports are available to both roles (admin and analyst).
+          Export the selected dataset's metrics or rows as CSV, using your current filters. Both roles can export authorized data.
         </p>
       </div>
 
-      <div className="bg-neutral-900/60 border border-neutral-800 rounded-lg p-4 space-y-4">
+      <div className="abi-panel border border-neutral-800 rounded-lg p-4 space-y-4">
         <FilterBar />
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -60,7 +61,7 @@ export default function Reports() {
         {error && <div className="text-sm text-red-400">{error}</div>}
       </div>
 
-      <div className="bg-neutral-900/60 border border-neutral-800 rounded-lg p-4 text-sm text-neutral-400">
+      <div className="abi-panel border border-neutral-800 rounded-lg p-4 text-sm text-neutral-400">
         CSV export uses the same verified warehouse aggregates as the dashboards. No fabricated
         values are written.
       </div>

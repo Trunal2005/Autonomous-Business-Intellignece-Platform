@@ -3,14 +3,14 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Dashboard from '@/pages/Dashboard'
 import { DatasetContext } from '@/hooks/useDataset'
-import { getAnalyticsOverview } from '@/services/api'
-vi.mock('@/services/api', () => ({ getAnalyticsOverview:vi.fn() }))
+import { getAnalyticsOverview, getBusinessEvidence } from '@/services/api'
+vi.mock('@/services/api', () => ({ getAnalyticsOverview:vi.fn(), getBusinessEvidence:vi.fn(async () => ({cards:[],series:[],rankings:[],recommendations:[],limitations:[],source:'Observed',status:'available'})) }))
 vi.mock('@/components/FilterBar', () => ({default:() => <div>Shared filters</div>}))
 vi.mock('@/hooks/useFilters', () => { const filters = {}; return { useFilters: () => ({ filters, resetFilters: vi.fn() }) } })
 const dataset = {dataset_id:'a',dataset_name:'Synthetic',status:'READY',row_count:2,column_count:3,quality:{missing_values:1,duplicate_rows:0},semantics:{fields:{},currency_code:null},updated_at:null} as never
 const result = {status:'available',dataset_name:'Synthetic',metric_cards:[{label:'Rows',value:2},{label:'Total revenue',value:1000}],time_series:[]}
 const wrapper = (child: React.ReactNode) => <MemoryRouter><DatasetContext.Provider value={{datasets:[dataset],active:dataset,busy:false,reload:async()=>{},select:async()=>{}}}>{child}</DatasetContext.Provider></MemoryRouter>
-beforeEach(() => { vi.resetAllMocks(); vi.mocked(getAnalyticsOverview).mockResolvedValue(result) })
+beforeEach(() => { vi.resetAllMocks(); vi.mocked(getAnalyticsOverview).mockResolvedValue(result); vi.mocked(getBusinessEvidence).mockResolvedValue({cards:[],series:[],rankings:[],recommendations:[],limitations:[],source:'Observed',status:'available'}) })
 afterEach(() => {cleanup();vi.clearAllMocks()})
 it('shows real context, quality, unknown currency and observed metrics', async () => {
   render(wrapper(<Dashboard />))

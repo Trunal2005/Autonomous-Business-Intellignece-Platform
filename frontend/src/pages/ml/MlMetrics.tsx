@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/ui/Workspace'
 import { useEffect, useState } from 'react'
 import {
   getMlStatus,
@@ -5,6 +6,9 @@ import {
 } from '@/services/api'
 import { useFilters } from '@/hooks/useFilters'
 import FilterBar from '@/components/FilterBar'
+import { Link } from 'react-router-dom'
+import { ForecastExperience } from './RevenueForecast'
+import { useDataset } from '@/hooks/useDataset'
 
 const statusColor: Record<string, string> = {
   available: 'text-emerald-400',
@@ -31,6 +35,8 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function MlMetrics() {
+  const { active } = useDataset()
+  const [target, setTarget] = useState<'orders' | 'revenue'>('orders')
   const { filters } = useFilters()
   const [features, setFeatures] = useState<MlFeature[]>([])
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -46,30 +52,27 @@ export default function MlMetrics() {
       })
       .catch(() => { if (current) setState('error') })
     return () => { current = false }
-  }, [filters])
+  }, [filters, active?.dataset_id, active?.updated_at])
 
-  if (state === 'loading') return <div className="text-neutral-400">Loading ML models…</div>
-  if (state === 'error') {
-    return (
-      <div className="text-red-400">
-        Could not load ML data. Ensure the backend is running and models are trained.
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-6">
       <FilterBar />
       <div>
-        <h1 className="text-2xl font-semibold">ML Metrics</h1>
+        <PageHeader title="ML Metrics" />
         <p className="text-sm text-neutral-500">
-          Model catalog and offline evaluation metrics. Status reflects the availability of trained artifacts.
+          Run a genuine forecast for the selected data. Model catalog and offline evaluation remain below.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {features.map((f) => (
-          <div key={f.name} className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800">
+      <ForecastExperience key={`${active?.dataset_id}:${active?.updated_at}`} target={target} onTargetChange={setTarget} />
+      <h2 className="text-xl font-medium">Model catalog and offline evaluation</h2>
+      {state === 'loading' && <p role="status">Loading ML models…</p>}
+      {state === 'error' && <p role="alert">Could not load the model catalog. Check the backend and trusted artifact path.</p>}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+        {state === 'ready' && features.map((f) => (
+          <div key={f.name} className="abi-panel p-4 rounded-lg border border-neutral-800">
             <div className="flex items-center justify-between mb-4">
               <div className="font-medium capitalize text-lg">{f.name.replace(/_/g, ' ')}</div>
               <StatusBadge status={f.status} />
@@ -83,9 +86,10 @@ export default function MlMetrics() {
                   <p className="text-xs text-neutral-400 mb-2">{m.metrics_scope}</p>
                   <p className="text-xs mb-2">Runtime: {m.runtime_ready === true ? 'Loaded and serving contract validated' : m.runtime_ready === false ? m.runtime_reason : 'Not checked'}{m.version ? ` · version ${m.version}` : ''}</p>
                   {m.compatibility && <div className="text-sm mb-3"><span className={m.compatibility.compatible ? 'text-emerald-400' : 'text-amber-400'}>{m.compatibility.compatible ? 'Compatible with active dataset' : 'Not Applicable to active dataset'}</span>{m.compatibility.reasons.map(reason => <p key={reason} className="text-xs text-neutral-400 mt-1">{reason}</p>)}</div>}
+                  {m.compatibility && !m.compatibility.compatible && <Link className="inline-block text-xs text-blue-400 mb-3" to="/datasets">Review dataset mapping →</Link>}
 
                   {m.metrics && (
-                    <div className="grid grid-cols-2 gap-2 mt-2">
+                    <details className="border-t border-neutral-800 mt-3 pt-1"><summary>Historical evaluation metrics</summary><div className="grid grid-cols-2 gap-2 mt-2">
                       {metricValues(m.metrics).map(([k, v]) => {
                         return (
                           <div key={k} className="bg-neutral-800/50 p-2 rounded">
@@ -96,10 +100,10 @@ export default function MlMetrics() {
                           </div>
                         )
                       })}
-                    </div>
+                    </div></details>
                   )}
 
-                  <div className="text-xs text-neutral-600 mt-3 flex justify-between">
+                  <div className="text-xs text-neutral-500 mt-3 flex flex-wrap gap-2 justify-between">
                     <span>Artifact: {m.artifact_available ? 'Present' : 'Missing'} · Inference runs on the task page</span>
                     {m.trained_at && <span>{new Date(m.trained_at).toLocaleDateString()}</span>}
                   </div>

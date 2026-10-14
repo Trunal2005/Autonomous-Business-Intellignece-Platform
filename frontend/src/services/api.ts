@@ -1,4 +1,4 @@
-import { getRefreshToken, getToken, getSessionGeneration, refreshAccessToken, type Role } from './auth'
+import { expireSession, getRefreshToken, getToken, getSessionGeneration, refreshAccessToken, type Role } from './auth'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 let activeDatasetId: string | null = null
@@ -25,6 +25,7 @@ function ensureContext(context: string, message = 'Dataset context changed; stal
 }
 
 async function requestResponse(path: string, init: RequestInit = {}, retry = true, context = getRequestContext()): Promise<Response> {
+  const session = getSessionGeneration()
   const r = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: { ...(init.headers as Record<string, string>), ...authHeaders() },
@@ -34,6 +35,10 @@ async function requestResponse(path: string, init: RequestInit = {}, retry = tru
     const token = await refreshAccessToken()
     ensureContext(context)
     if (token) return requestResponse(path, init, false, context)
+  }
+  if (r.status === 401 && (!retry || !getRefreshToken())) {
+    expireSession(session)
+    throw new Error('Session expired. Sign in again. (Request failed: 401)')
   }
   if (!r.ok) {
     const error = await r.json().catch(() => null)
@@ -278,6 +283,20 @@ export interface ForecastPoint {
   date: string
   orders?: number
   revenue?: number
+}
+
+export interface BusinessEvidenceResponse {
+  status: string; source: string; currency_code?: string | null; measurement_window?: string
+  cards: { label: string; value: number | null }[]
+  series: { period: string; first_time?: number; returning?: number; revenue?: number }[]
+  frequency?: { orders: number; customers: number }[]
+  rankings: { label: string; value: number; orders?: number; late?: number; mean_late_days?: number | null }[]
+  recommendations: { id: string; title: string; priority: string; observation: string; suggested_action: string; measurement_window: string; limitations: string; metric_source: string; evidence: Record<string, unknown> }[]
+  limitations: string[]
+}
+
+export function getBusinessEvidence(domain: 'revenue' | 'customers' | 'sellers', params: Record<string, string> = {}) {
+  return getJson<BusinessEvidenceResponse>(`/api/analytics/business?${new URLSearchParams({ ...params, domain })}`)
 }
 
 export function getForecast(periods = 30, target: 'orders' | 'revenue' = 'orders', params: Record<string, string> = {}) {

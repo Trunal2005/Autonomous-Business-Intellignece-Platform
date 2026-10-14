@@ -28,7 +28,7 @@ export default function FilterBar({ showGrain = false }: { showGrain?: boolean }
     else delete next[field]
     setFilters({ column_filters: Object.keys(next).length ? JSON.stringify(next) : null })
   }
-  return <div className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800 flex flex-wrap gap-4 items-end">
+  return <div className="abi-panel abi-filterbar" aria-label="Dataset filters">
     {options.has_date !== false && ['date_from', 'date_to'].map(field => <label key={field} className="flex flex-col gap-1 text-xs text-neutral-400">{field === 'date_from' ? 'Date From' : 'Date To'}
       <input aria-label={field === 'date_from' ? 'Date From' : 'Date To'} type="date" className={inputClass} value={filters[field] || ''} min={options.date_range.min.slice(0, 10)} max={options.date_range.max.slice(0, 10)} onChange={e => setFilters({ [field]: e.target.value || null })} />
     </label>)}

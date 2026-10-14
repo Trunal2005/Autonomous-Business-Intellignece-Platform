@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/ui/Workspace'
 import { useEffect, useState } from 'react'
 import { useDataset } from '@/hooks/useDataset'
 import { deleteDataset, getDatasetPreview, uploadDataset, updateDatasetSchema, type Dataset } from '@/services/api'
@@ -84,9 +85,9 @@ export default function Datasets() {
     catch (e) { setError(e instanceof Error ? e.message : 'Delete failed.') }
   }
   return <div className="space-y-6">
-    <h1 className="text-2xl font-semibold">Dataset Manager</h1>
+    <PageHeader title="Dataset Manager" eyebrow="02 / Your data workspace" description="Private sources, validated schemas, and a clear context for every analysis." />
     <BundleUpload saved={async ds => { await reload(); setInspectId(ds.dataset_id) }} />
-    <form onSubmit={e => { e.preventDefault(); void upload() }} className="bg-neutral-900/60 border border-neutral-800 rounded-lg p-4 space-y-4">
+    <form onSubmit={e => { e.preventDefault(); void upload() }} className="abi-panel border border-neutral-800 rounded-lg p-4 space-y-4">
       <p className="text-neutral-400 text-sm">Upload CSV, a single worksheet XLSX/XLS, or a JSON array of flat records. Each upload is an independent private dataset.</p>
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1 text-sm">Dataset name<input aria-label="Dataset name" className={inputClass} value={name} maxLength={120} required onChange={e => setName(e.target.value)} /></label>
@@ -96,7 +97,7 @@ export default function Datasets() {
       {busy && <p role="status">Processing and profiling dataset…</p>}
       {error && <p role="alert" className="text-red-400">{error}</p>}
     </form>
-    <div className="overflow-auto border border-neutral-800 rounded-lg">
+    <div className="overflow-auto border border-neutral-800 rounded-lg" tabIndex={0} aria-label="Dataset catalog; scroll horizontally for more columns">
       <table className="w-full text-sm text-left"><thead className="bg-neutral-900"><tr>{['Dataset', 'Status', 'Rows', 'Columns', 'Actions'].map(h => <th className="p-3" key={h}>{h}</th>)}</tr></thead>
         <tbody>{datasets.map(d => <tr key={d.dataset_id} className="border-t border-neutral-800">
           <td className="p-3">{d.dataset_name}{d.tables && <span className="block text-neutral-400">Bundle · {d.tables.length} tables</span>}{(active?.dataset_id === d.dataset_id || active?.bundle_id === d.dataset_id) && <span className="text-blue-400 ml-2">Active</span>}</td>
@@ -106,18 +107,18 @@ export default function Datasets() {
         </tr>)}</tbody></table>
       {!datasets.length && <p className="p-4 text-neutral-400">No datasets yet. Upload one to begin.</p>}
     </div>
-    {inspected && <section className="bg-neutral-900/60 border border-neutral-800 rounded-lg p-4 space-y-4">
+    {inspected && <section key={`inspection:${inspected.dataset_id}`} className="abi-panel border border-neutral-800 rounded-lg p-4 space-y-4">
       <h2 className="text-lg font-medium">{inspected.dataset_name} — {inspected.tables ? 'Bundle tables' : 'Schema and quality'}</h2>
       {inspected.tables && <><p className="text-amber-300 text-sm">{inspected.relational_analysis?.reason}</p><div className="space-y-2">{inspected.tables.map(t => <div key={t.dataset_id} className="border border-neutral-700 rounded-lg p-3 flex flex-wrap gap-3 items-center"><strong className="break-all mr-auto">{t.relative_path}</strong><span>{t.row_count} rows · {t.column_count} columns · {t.status}</span><button onClick={() => setInspectId(t.dataset_id)}>Inspect table</button><button className="text-blue-400" onClick={() => void select(t.dataset_id).catch(e => setError(e.message))}>Analyze table</button></div>)}</div></>}
       {inspected.tables && inspected.relational_analysis?.supported && <div className="space-y-2"><Link to="/dashboard" onClick={e => { e.preventDefault(); void select(inspected.dataset_id,'/dashboard').catch(error => setError(error.message)) }} className="inline-block rounded bg-blue-600 px-4 py-2">Open bundle Dashboard</Link><p className="text-sm text-neutral-400">Revenue is the sum of item prices, excluding freight. Payments are reported separately. Confirm the currency below before ML inference. Uploaded real/synthetic provenance has not been verified.</p><SchemaReview key={inspected.dataset_id} dataset={inspected} saved={reload} /></div>}
       {inspected.bundle_id && <button className="text-blue-400" onClick={() => setInspectId(inspected.bundle_id!)}>Back to bundle</button>}
       <p className="text-sm">Missing values: {inspected.quality.missing_values ?? 'Unavailable'} · Duplicate rows: {inspected.quality.duplicate_rows ?? 'Unavailable'}</p>
       {inspected.quality.warnings?.map(w => <p key={w} className="text-amber-400 text-sm">{w}</p>)}
-      {!inspected.tables && !inspected.read_only && inspected.status === 'READY' && <TablePreview key={inspected.dataset_id} id={inspected.dataset_id} />}
+      {!inspected.tables && !inspected.read_only && inspected.status === 'READY' && <TablePreview key={`preview:${inspected.dataset_id}`} id={inspected.dataset_id} />}
       <div className="overflow-auto"><table className="w-full text-sm text-left"><thead><tr>{['Field', 'Type', 'Detected role', 'Confidence', 'Missing', 'Unique'].map(h => <th key={h} className="p-2">{h}</th>)}</tr></thead>
         <tbody>{inspected.schema.columns?.map(c => <tr key={c.name} className="border-t border-neutral-800">{[c.name, c.dtype, c.role, `${Math.round(c.confidence * 100)}%`, c.missing, c.unique].map((v, i) => <td key={i} className="p-2">{v}</td>)}</tr>)}</tbody></table></div>
       <div className="grid sm:grid-cols-3 gap-2 text-sm">{Object.entries(inspected.capabilities).map(([feature, c]) => <div key={feature} className="border border-neutral-800 p-3 rounded"><strong className="capitalize">{feature}</strong>: {c.available ? 'Available' : 'Not available'}{c.reason && <p className="text-neutral-400 mt-1">{c.reason}</p>}</div>)}</div>
-      {!inspected.tables && !inspected.read_only && inspected.status === 'READY' && <SchemaReview key={inspected.dataset_id} dataset={inspected} saved={reload} />}
+      {!inspected.tables && !inspected.read_only && inspected.status === 'READY' && <SchemaReview key={`schema:${inspected.dataset_id}`} dataset={inspected} saved={reload} />}
     </section>}
   </div>
 }

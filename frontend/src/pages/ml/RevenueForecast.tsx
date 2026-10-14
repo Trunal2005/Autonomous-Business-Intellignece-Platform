@@ -1,181 +1,73 @@
-import { useEffect, useState } from 'react'
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from 'recharts'
+import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { KpiCard } from '@/components/KpiCard'
-import { getForecast, type ForecastPoint } from '@/services/api'
+import ForecastChart from '@/components/ForecastChart'
+import BusinessEvidence from '@/components/BusinessEvidence'
+import { getForecast } from '@/services/api'
+import { forecastPoints, forecastNumber, type ChartPoint, type ForecastTarget } from '@/services/forecast'
 import { useFilters } from '@/hooks/useFilters'
+import { useDataset } from '@/hooks/useDataset'
 import FilterBar from '@/components/FilterBar'
 
-const fmtMoney = (n: number) =>
-  `R$ ${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
-
-export default function RevenueForecast({ target = 'revenue' }: { target?: 'orders' | 'revenue' }) {
-  const label = target === 'revenue' ? 'Revenue' : 'Orders'
-  const fmtValue = target === 'revenue' ? fmtMoney : (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
+export function ForecastExperience({ target, onTargetChange }: { target: ForecastTarget; onTargetChange?: (target: ForecastTarget) => void }) {
+  const { active } = useDataset()
+  const Heading = onTargetChange ? 'h2' : 'h1'
   const { filters } = useFilters()
-  const [reason, setReason] = useState<string | null>(null)
-  const [history, setHistory] = useState<ForecastPoint[]>([])
-  const [forecast, setForecast] = useState<ForecastPoint[]>([])
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [horizon, setHorizon] = useState<number>(30)
-
+  const [horizon, setHorizon] = useState(30)
+  const stamp = `${active?.dataset_id}:${active?.updated_at}:${JSON.stringify(filters)}:${target}:${horizon}`
+  const [result, setResult] = useState<{ stamp: string; points?: ChartPoint[]; reason?: string } | null>(null)
+  const currency = active?.semantics.currency_code
+  const unit = target === 'orders' ? 'orders' : `item revenue (${currency || 'currency unconfirmed'})`
+  const format = (n: number) => forecastNumber(n, target, currency)
   useEffect(() => {
     let current = true
-    setState('loading')
-    setReason(null)
-    getForecast(horizon, target, filters)
-      .then((res) => {
-        if (!current) return
-        if (res.status === 'not_applicable') { setReason(res.reason || 'Model requirements are not satisfied.'); setState('ready'); setHistory([]); setForecast([]); return }
-        setHistory(res.history_tail)
-        setForecast(res.forecast)
-        setState('ready')
-      })
-      .catch(e => { if (current) { setReason(e.message); setState('error') } })
+    if (active) getForecast(horizon, target, filters).then(response => {
+      if (!current) return
+      if (response.status === 'not_applicable') setResult({ stamp, reason: response.reason || 'Model requirements are not satisfied.' })
+      else {
+        const points = forecastPoints(response.history_tail, response.forecast, target)
+        if (response.forecast.length !== horizon) throw new Error('The returned horizon does not match the requested daily forecast.')
+        setResult({ stamp, points })
+      }
+    }).catch(error => { if (current) setResult({ stamp, reason: error.message }) })
     return () => { current = false }
-  }, [horizon, target, filters])
-
-  const forecastData = [
-    ...history.map((p) => ({ date: p.date, historical: p[target], forecast: null as number | null })),
-    ...forecast.map((p) => ({ date: p.date, historical: null as number | null, forecast: p[target] })),
-  ]
-
-  const totalForecastRevenue = forecast.reduce((acc, p) => acc + (p[target] || 0), 0)
-  const avgForecastRevenue = forecast.length > 0 ? totalForecastRevenue / forecast.length : 0
-  const latestHistorical = history.length > 0 ? history[history.length - 1][target] || 0 : 0
-
-  return (
-    <div className="space-y-6">
-      <FilterBar />
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-2xl font-semibold">{target === 'revenue' ? 'Revenue' : 'Order'} Forecast</h1>
-          <p className="text-sm text-neutral-500">
-            Machine Learning (Linear Regression) predictive forecast of daily {target}, trained on lag and rolling historical features.
-          </p>
-        </div>
-        <div className="bg-neutral-900 border border-neutral-800 rounded px-3 py-1.5 flex items-center gap-2">
-          <label className="text-sm text-neutral-400">Horizon:</label>
-          <select
-            aria-label="Forecast horizon"
-            value={horizon}
-            onChange={(e) => setHorizon(Number(e.target.value))}
-            className="bg-transparent text-sm text-neutral-200 outline-none"
-          >
-            <option value={7}>7 Days</option>
-            <option value={14}>14 Days</option>
-            <option value={30}>30 Days</option>
-            <option value={90}>90 Days</option>
-          </select>
-        </div>
+  }, [stamp, active, filters, horizon, target])
+  const points = useMemo(() => result?.stamp === stamp ? result.points || [] : [], [result, stamp])
+  const historical = points.filter(p => p.historical !== null), future = points.filter(p => p.forecast !== null)
+  const latest = historical[historical.length - 1], first = future[0], last = future[future.length - 1]
+  const total = future.reduce((sum, p) => sum + p.forecast!, 0)
+  const baseline = future.length && historical.length >= future.length ? historical.slice(-future.length).reduce((sum, p) => sum + p.historical!, 0) : null
+  const change = baseline != null && baseline > 0 ? (total / baseline - 1) * 100 : null
+  const negative = future.some(p => p.forecast! < 0)
+  return <div className="space-y-5">
+    <div className="flex flex-wrap gap-4 justify-between items-start">
+      <div><Heading className="text-2xl font-semibold">{target === 'orders' ? 'Order' : 'Revenue'} Forecast</Heading><p className="text-sm text-neutral-400 mt-1">{active?.dataset_name || 'Select a dataset'} · genuine daily Linear Regression inference</p></div>
+      <div className="flex flex-wrap gap-3 items-center">
+        {onTargetChange && <label className="text-sm">Forecast target <select aria-label="Forecast target" className="bg-neutral-900 border border-neutral-700 rounded p-2 ml-2" value={target} onChange={e => onTargetChange(e.target.value as ForecastTarget)}><option value="orders">Orders</option><option value="revenue">Revenue</option></select></label>}
+        <label className="text-sm">Horizon <select aria-label="Forecast horizon" className="bg-neutral-900 border border-neutral-700 rounded p-2 ml-2" value={horizon} onChange={e => setHorizon(Number(e.target.value))}>{[7, 14, 30, 90].map(n => <option value={n} key={n}>{n} Days</option>)}</select></label>
       </div>
-
-      {state === 'loading' && <div className="text-neutral-400">Running forecast model...</div>}
-
-      {state === 'error' && (
-        <div className="text-red-400">
-          {reason || 'Failed to generate forecast.'}
-        </div>
-      )}
-
-      {state === 'ready' && reason && <div role="status" className="bg-neutral-900 border border-neutral-800 rounded p-4"><h2>Not Applicable</h2><p className="text-neutral-400">{reason}</p></div>}
-      {state === 'ready' && !reason && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <KpiCard
-              label={`Latest Actual ${label}`}
-              value={fmtValue(latestHistorical)}
-            />
-            <KpiCard
-              label={`Forecast Average (${horizon}d)`}
-              value={fmtValue(avgForecastRevenue)}
-            />
-            <KpiCard
-              label={`Forecast Total (${horizon}d)`}
-              value={fmtValue(totalForecastRevenue)}
-            />
-          </div>
-
-          <div className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="font-medium">Historical Actuals vs Predicted {label}</h2>
-              <div className="text-xs text-neutral-500 bg-neutral-800/50 px-2 py-1 rounded">
-                Model: Linear Regression (Daily)
-              </div>
-            </div>
-
-            <ResponsiveContainer width="100%" height={360}>
-              <LineChart data={forecastData} margin={{ top: 10, right: 10, left: 20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
-                <XAxis dataKey="date" stroke="#666" fontSize={11} minTickGap={30} />
-                <YAxis
-                  stroke="#666"
-                  fontSize={11}
-                  tickFormatter={(v) => target === 'revenue' ? `R$${Math.round(v / 1000)}k` : fmtValue(v)}
-                />
-                <Tooltip
-                  contentStyle={{ background: '#171717', border: '1px solid #333' }}
-                  formatter={(val: number, name: string) => [fmtValue(val), `${name === 'historical' ? 'Actual' : 'Predicted'} ${label}`]}
-                />
-                <Legend iconType="circle" />
-                <Line
-                  name="historical"
-                  type="monotone"
-                  dataKey="historical"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={{ r: 2, fill: '#3b82f6', strokeWidth: 0 }}
-                  activeDot={{ r: 4 }}
-                  connectNulls
-                />
-                <Line
-                  name="forecast"
-                  type="monotone"
-                  dataKey="forecast"
-                  stroke="#f59e0b"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  dot={{ r: 2, fill: '#f59e0b', strokeWidth: 0 }}
-                  activeDot={{ r: 4 }}
-                  connectNulls
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="bg-neutral-900/60 p-4 rounded-lg border border-neutral-800 mt-6">
-            <h2 className="mb-4 font-medium text-sm text-neutral-400 uppercase tracking-wider">Forecast Data Table</h2>
-            <div className="max-h-64 overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="text-neutral-500 text-xs uppercase sticky top-0 bg-neutral-900 border-b border-neutral-800">
-                  <tr>
-                    <th className="text-left py-2 px-4">Date</th>
-                    <th className="text-right py-2 px-4">Predicted {label}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {forecast.map((p) => (
-                    <tr key={p.date} className="border-b border-neutral-800/30 hover:bg-neutral-800/50">
-                      <td className="py-2 px-4 text-neutral-300 font-mono">{p.date}</td>
-                      <td className="py-2 px-4 text-right font-mono text-amber-400">{fmtValue(p[target] || 0)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
+      {change != null && <p className="text-sm text-neutral-300">Model-estimated change versus the preceding {future.length} observed days: {change.toFixed(2)}%. Equal-length adjacent windows; this is a forecast comparison, not realized growth.</p>}
     </div>
-  )
+    {!active ? <p>Select a dataset in <Link to="/datasets">Dataset Manager</Link>.</p> : result?.stamp !== stamp ? <p role="status">Running forecast model…</p> : result.reason ? <div role="status" className="abi-panel p-5"><h3>Not Applicable</h3><p className="text-xs text-neutral-400">Forecast unavailable for this selection.</p><p>{result.reason}</p><Link className="text-blue-400 text-sm" to="/datasets">Review dataset mapping and coverage →</Link></div> : <>
+      <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <KpiCard label={`Latest Actual ${target === 'orders' ? 'Orders' : 'Revenue'}`} value={format(latest.historical!)} hint={latest.date} />
+        <KpiCard label="First future prediction" value={format(first.forecast!)} hint={first.date} />
+        <KpiCard label="Horizon-end prediction" value={format(last.forecast!)} hint={last.date} />
+        <KpiCard label={`Forecast total (${horizon}d)`} value={format(total)} hint={`Daily average ${format(total / future.length)} · ${unit}`} />
+      </div>
+      <p className="text-xs text-neutral-400">Model: Linear Regression (Daily)</p>
+      <ForecastChart points={points} format={format} unit={unit} />
+      {negative && <p role="status" className="text-amber-400">The existing unconstrained model returned negative estimates. They are shown unchanged and require review before business use.</p>}
+      <p className="text-xs text-neutral-400">Historical window: {historical[0].date}–{latest.date}. Forecast: {first.date}–{last.date}. No aligned out-of-sample prediction series or validated intervals are returned, so neither is plotted. Offline evaluation remains in the model catalog.</p>
+      <section className="abi-panel p-4"><h3 className="mb-3 font-medium">Forecast Data Table</h3><div className="overflow-auto max-h-64"><table className="w-full text-sm"><thead><tr><th className="text-left p-2">Date</th><th className="text-right">Future forecast · {unit}</th></tr></thead><tbody>{future.map(p => <tr key={p.date}><td className="p-2">{p.date}</td><td className="text-right font-mono">{format(p.forecast!)}</td></tr>)}</tbody></table></div></section>
+    </>}
+    {target === 'revenue' && <BusinessEvidence domain="revenue" />}
+    <details className="abi-panel p-4"><summary>Model coverage and limitations</summary><p className="text-xs text-neutral-400 mt-3">Uses the existing saved Linear Regression model with ordered lag1, lag7, lag14, lag30, roll7 and roll30 features, recursively for 1–90 days. At least 30 consecutive daily observations are required. Date and applicable dimension filters select inference history; chart grain does not change daily model inputs. Dates continue from the selected historical endpoint, which may precede today. Predictions are uncertain estimates, not guaranteed results. No customer-volume or seller-delay model is registered. Revenue requires the existing commerce/BRL compatibility contract; arbitrary uploads are not assigned a currency.</p></details>
+  </div>
 }
 
+export default function RevenueForecast({ target = 'revenue' }: { target?: ForecastTarget }) {
+  const { active } = useDataset()
+  return <div className="space-y-6"><FilterBar /><ForecastExperience key={`${active?.dataset_id}:${active?.updated_at}`} target={target} /></div>
+}
 export function OrderForecast() { return <RevenueForecast target="orders" /> }

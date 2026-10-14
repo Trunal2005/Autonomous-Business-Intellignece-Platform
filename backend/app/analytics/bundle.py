@@ -202,6 +202,7 @@ class BundleSource:
                 days=extract('epoch',cast(delivered,DateTime)-cast(self.oc['order_purchase_timestamp'],DateTime))/86400
             else: days=func.julianday(delivered)-func.julianday(self.oc['order_purchase_timestamp'])
             expressions.append(func.avg(case((days>=0,days),else_=None)).label('delivery'))
+            expressions.append(func.count(case(((self.oc['order_status']=='delivered') & (days>=0),1),else_=None)).label('completed_deliveries'))
         aggregate=self.rows(select(*expressions).select_from(self.order_base).where(*self.where))[0]
         n=aggregate['orders'];revenue=None;payments=None
         if self.amount is not None:
@@ -211,7 +212,9 @@ class BundleSource:
         result={'total_orders':n,'unique_customers':aggregate.get('customers'),
                 'total_revenue':revenue,'avg_order_value':revenue/n if revenue is not None and n else None,
                 'total_payments':payments,
-                'products_sold':None,'active_sellers':None,'items_sold':None,'avg_review_score':None,'avg_delivery_days':aggregate.get('delivery')}
+                'products_sold':None,'active_sellers':None,'items_sold':None,'avg_review_score':None,'avg_delivery_days':aggregate.get('delivery'),
+                'completed_delivery_orders':aggregate.get('completed_deliveries'),
+                'delivery_completion_pct':100*aggregate['completed_deliveries']/n if n and 'completed_deliveries' in aggregate else None}
         if self.item_base is not None:
             columns=[func.count(),func.count(func.distinct(self.ic['product_id'])),func.count(func.distinct(self.ic['seller_id']))]
             counts=self.db.execute(self.item_statement(*columns) if self.item_where else self.fact_statement('items',*columns)).one()
@@ -258,10 +261,47 @@ class BundleSource:
                 'customer_states':values('customers','customer_state') if self.enabled('orders','customers') else [],'seller_states':values('sellers','seller_state') if self.enabled('items','sellers') else [],
                 'order_statuses':values('orders','order_status'),'payment_types':values('payments','payment_type') if self.enabled('payments','orders') else [],'review_scores':values('reviews','review_score') if self.enabled('reviews','orders') else []}
 
+    def specialist_charts(self, section):
+        """Bounded native-grain aggregates, only for the requested specialist page."""
+        charts=[]
+        if section == 'products' and self.item_base is not None:
+            product=self.ic['product_id']; revenue=func.sum(self.ic['price']); quantity=func.count()
+            query=self.item_statement(product.label('label'),revenue.label('revenue'),quantity.label('quantity'),func.avg(self.ic['price']).label('price')).where(product.is_not(None)).group_by(product)
+            highest_revenue=self.rows(query.order_by(revenue.desc(),product).limit(10))
+            highest_quantity=self.rows(query.order_by(quantity.desc(),product).limit(50))
+            charts.extend([
+                {'title':'Highest-revenue products','kind':'bar','x':'label','y':'revenue','data':highest_revenue,'note':'Top 10 by qualifying item price, excluding freight.'},
+                {'title':'Highest-selling products','kind':'bar','x':'label','y':'quantity','data':highest_quantity[:10],'note':'Top 10 by item-row count; one validated row per order item.'},
+                {'title':'Product price versus observed demand','kind':'scatter','x':'price','y':'quantity','data':highest_quantity,'note':'Top 50 products by item count; mean observed item price versus item count. Association, not a causal price effect.'}])
+        if section in {'delivery','overview','dashboard'}:
+            delivered=self.oc.get('order_delivered_customer_date'); estimated=self.oc.get('order_estimated_delivery_date')
+            if delivered is not None:
+                from sqlalchemy import cast,DateTime,extract
+                purchase=self.oc['order_purchase_timestamp']
+                if self.db.get_bind().dialect.name == 'postgresql':
+                    duration=extract('epoch',cast(delivered,DateTime)-cast(purchase,DateTime))/86400
+                else: duration=func.julianday(delivered)-func.julianday(purchase)
+                valid=(self.oc['order_status']=='delivered') & (duration>=0)
+                expression=f'{self.ot.name}.{purchase.name}'
+                if self.db.get_bind().dialect.name == 'postgresql': expression=f'CAST({expression} AS timestamp)'
+                period=literal_column(period_expr(self.db,expression,'month')).label('label')
+                rows=self.rows(select(period,func.avg(case((valid,duration),else_=None)).label('days'),
+                    (100.0*func.sum(case((self.oc['order_status']=='canceled',1),else_=0))/func.count()).label('cancellation_rate'))
+                    .select_from(self.order_base).where(*self.where,purchase.is_not(None)).group_by(period).order_by(period.desc()).limit(120))[::-1]
+                charts.extend([{'title':'Average completed delivery time','kind':'line','x':'label','y':'days','data':rows,'note':'Days from purchase to delivery; valid delivered orders only, grouped by purchase month.'},
+                    {'title':'Order cancellation rate','kind':'line','x':'label','y':'cancellation_rate','data':rows,'note':'Canceled orders / all matching orders × 100, grouped by purchase month. Missing delivery dates are not zero-duration deliveries.'}])
+        return charts
+
     def view(self,section='dashboard'):
         k=self.kpis(); labels={'total_orders':'Distinct orders','unique_customers':'Unique customers','products_sold':'Products sold','active_sellers':'Active sellers','items_sold':'Items sold','total_revenue':'Item revenue','avg_order_value':'Average order value','total_payments':'Payment total','avg_review_score':'Average review score','avg_delivery_days':'Average delivery days'}
         statuses=self.statuses(); categories=self.category()
         dates=self.db.execute(select(func.min(self.oc['order_purchase_timestamp']),func.max(self.oc['order_purchase_timestamp']))).one()
+        product_highlights={}
+        if section in {'overview','dashboard'} and self.item_base is not None:
+            product=self.ic['product_id']; revenue=func.sum(self.ic['price']); quantity=func.count()
+            query=self.item_statement(product.label('product'),revenue.label('revenue'),quantity.label('quantity')).where(product.is_not(None)).group_by(product)
+            product_highlights={'by_revenue':self.rows(query.order_by(revenue.desc(),product).limit(5)),
+                                'by_quantity':self.rows(query.order_by(quantity.desc(),product).limit(5))}
         return {'status':'available','dataset_id':self.ds.id,'dataset_name':self.ds.name,'section':section,'filters':self.f.as_dict(),'kpis':k,
                 'date_range':{'min':dates[0],'max':dates[1]},
                 'metric_cards':[{'label':label,'value':k[key]} for key,label in labels.items()], 'currency_code':self.ds.semantics.get('currency_code'),
@@ -269,6 +309,8 @@ class BundleSource:
                   ([{'field':'category','measure':'amount','series':[{'label':r['category'] or 'Unmapped category','rows':r['items'],'amount':r['revenue']} for r in categories]}] if categories else []),
                 'entities':[{'label':r['category'] or 'Unmapped category','rows':r['items'],'amount':r['revenue']} for r in categories],
                 'quality':self.ds.quality,'relationships':self.meta,'revenue_definition':self.meta['revenue_definition'],'grain':'orders',
+                'specialist_charts':self.specialist_charts(section),
+                'product_highlights':product_highlights,
                 'metric_definitions':{'avg_order_value':'Average order value = qualifying item prices / matching distinct orders. Category/seller filters narrow the item prices.',
                     'total_payments':'Payment totals cover all payment rows for matching orders. Payment-type filters select orders by existence.',
                     'avg_review_score':'Average review score covers all review rows for matching orders. Review-score filters select orders by existence.',

@@ -13,6 +13,7 @@ same metric reconciles across pages for the same filters.
 from __future__ import annotations
 
 from typing import Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -22,6 +23,17 @@ from app.analytics.filters import GRAINS, Filters, analytics_filters, parse_filt
 from app.database.deps import get_db
 
 router = APIRouter()
+
+
+@router.get("/business")
+def business_evidence(
+    domain: Literal['revenue', 'customers', 'sellers'] = 'revenue',
+    f: Filters = Depends(analytics_filters),
+    db: Session = Depends(get_db),
+):
+    """Opt-in evidence without re-running every legacy dashboard aggregate."""
+    from app.analytics.business import evidence
+    return evidence(db, f, domain)
 
 
 def _grain(grain: Optional[str]) -> str:

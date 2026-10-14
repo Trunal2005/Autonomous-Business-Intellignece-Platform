@@ -14,7 +14,7 @@ export default function MlLayout() {
   const location = useLocation()
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap gap-x-6 gap-y-3 border-b border-neutral-800 text-sm">
+      <div className="abi-tabs">
         {nav.map((n) => (
           <NavLink
             key={n.name}

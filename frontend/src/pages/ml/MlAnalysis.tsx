@@ -1,4 +1,7 @@
+import { PageHeader } from '@/components/ui/Workspace'
 import { useEffect, useRef, useState } from 'react'
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
+import { forecastDate } from '@/services/forecast'
 import FilterBar from '@/components/FilterBar'
 import { useFilters } from '@/hooks/useFilters'
 import { getAnomalies, getCustomerSegments, getRequestContext, predictSales,
@@ -27,9 +30,10 @@ function Outcome({ result, error }: { result: { status: string; reason?: string 
 
 export function CustomerSegments() {
   const { result, error } = useResults<CustomerSegmentsResponse>(getCustomerSegments)
-  return <div className="space-y-4"><FilterBar /><h1 className="text-2xl font-semibold">Customer Segments</h1>
+  return <div className="space-y-4"><FilterBar /><PageHeader title="Customer Segments" />
     <p>Saved K-Means model and scaler applied to customer recency, order frequency and monetary value in the selected dataset.</p>
     <Outcome result={result} error={error} />
+    {result?.status === 'available' && result.segments.length > 0 && <section className="abi-panel p-5 min-w-0"><h2>Observed customers by trained segment</h2><p className="text-xs text-neutral-400 mb-4">Cluster membership from the saved RFM scaler and K-Means model. Segments are not future customer counts.</p><ResponsiveContainer width="100%" height={260}><BarChart data={result.segments}><CartesianGrid stroke="rgb(var(--border))" /><XAxis dataKey="segment" /><YAxis allowDecimals={false} /><Tooltip contentStyle={{background:'rgb(var(--surface-raised))'}} /><Bar isAnimationActive={false} dataKey="customers" fill="var(--chart-1)" /></BarChart></ResponsiveContainer></section>}
     {result?.status === 'available' && <table className="w-full text-sm"><thead><tr><th scope="col">Segment</th><th scope="col">Customers</th><th scope="col">Monetary total (BRL)</th></tr></thead>
       <tbody>{result.segments.map(s => <tr key={s.segment}><td>{s.segment}</td><td>{s.customers}</td><td>{s.monetary.toLocaleString()}</td></tr>)}</tbody></table>}
   </div>
@@ -37,10 +41,11 @@ export function CustomerSegments() {
 
 export function Anomalies() {
   const { result, error } = useResults<AnomaliesResponse>(getAnomalies)
-  return <div className="space-y-4"><FilterBar /><h1 className="text-2xl font-semibold">Anomaly Detection</h1>
+  return <div className="space-y-4"><FilterBar /><PageHeader title="Anomaly Detection" />
     <p>Saved Isolation Forest applied to daily orders and revenue after selected filters. Scores are decision-function values, not probabilities.</p>
     <Outcome result={result} error={error} />
     {result?.status === 'available' && <><p role="status" aria-label="Anomaly summary">{result.n_anomalies} anomalous days out of {result.n_days} analyzed.</p>
+      {result.anomalies.length > 0 && <section className="abi-panel p-5 min-w-0"><h2>Observed anomaly timeline</h2><p className="text-xs text-neutral-400 mb-4">Up to 100 flagged days returned by the existing model, sorted by date for display. Omitted days are not plotted as zero. Decision scores are not probabilities.</p><ResponsiveContainer width="100%" height={280}><ScatterChart><CartesianGrid stroke="rgb(var(--border))" /><XAxis dataKey="time" name="Date" type="number" domain={['dataMin','dataMax']} tickFormatter={forecastDate} minTickGap={65} /><YAxis dataKey="score" type="number" name="Decision score" /><Tooltip formatter={(value: number, name: string) => name === 'Date' ? [forecastDate(value),name] : [value,name]} contentStyle={{background:'rgb(var(--surface-raised))'}} /><Scatter isAnimationActive={false} name="Flagged days" data={result.anomalies.map(point => ({...point,time:Date.parse(`${point.date}T00:00:00Z`)})).sort((a,b)=>a.time-b.time)} fill="var(--chart-3)" /></ScatterChart></ResponsiveContainer></section>}
       {result.anomalies.length ? <table className="w-full text-sm"><thead><tr><th scope="col">Date</th><th scope="col">Orders</th><th scope="col">Revenue (BRL)</th><th scope="col">Score</th></tr></thead>
         <tbody>{result.anomalies.map(a => <tr key={a.date}><td>{a.date}</td><td>{a.orders}</td><td>{a.revenue.toLocaleString()}</td><td>{a.score.toFixed(4)}</td></tr>)}</tbody></table>
         : <p>No anomalous days were returned for the selected filters.</p>}</>}
@@ -73,8 +78,8 @@ export function SalesPrediction() {
     } catch (e) { if (current()) setError(e instanceof Error ? e.message : 'Prediction failed.') }
     finally { if (current()) setBusy(false) }
   }
-  return <div className="space-y-4"><FilterBar /><h1 className="text-2xl font-semibold">Sales Prediction</h1>
-    <p>Enter checkout features for the existing item-revenue model. The selected dataset must satisfy the trained commerce and BRL contract.</p>
+  return <div className="space-y-4"><FilterBar /><PageHeader title="Sales Prediction" />
+    <p>Enter checkout features for the existing item-revenue model. The selected dataset must satisfy the trained commerce and BRL contract. Shared filters check input compatibility; the estimate uses the checkout features entered below.</p>
     <form onSubmit={e => void submit(e)} className="grid sm:grid-cols-2 gap-3">
       {[['purchase_month', 'Purchase month', 1, 12], ['purchase_weekday', 'Purchase weekday (Monday = 0)', 0, 6],
         ['purchase_hour', 'Purchase hour', 0, 23], ['n_items', 'Basket item count', 1, undefined]].map(([name, label, min, max]) =>

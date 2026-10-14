@@ -1,9 +1,18 @@
 import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import DatasetResults from '@/components/DatasetResults'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 describe('semantic analytics content', () => {
+  it('uses full selected revenue for category shares and full status totals, with unavailable profit',()=>{
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    render(<DatasetResults dashboard monetaryFields={['Item revenue']} data={{status:'available',grain:'orders',kpis:{total_revenue:200,total_orders:4},metric_cards:[{label:'Item revenue',value:200},{label:'Distinct orders',value:4}],distributions:[{field:'order status',series:[{label:'delivered',rows:3},{label:'canceled',rows:1}]}],entities:[{label:'Top category',rows:1,amount:50}]}} />)
+    expect(screen.getByLabelText('Order status shares')).toHaveTextContent('delivered · 3 orders · 75.00%')
+    expect(screen.getByLabelText('Order status shares')).toHaveTextContent('canceled · 1 orders · 25.00%')
+    expect(screen.getByRole('row',{name:/Top category/})).toHaveTextContent('25.00%')
+    expect(screen.getByText('Total Profit').parentElement).toHaveTextContent('Unavailable')
+    expect(screen.getByText('Profit Margin').parentElement).toHaveTextContent('Unavailable')
+  })
   it('renders observed student measures with neutral units', () => {
     render(<DatasetResults data={{ status: 'available', dataset_name: 'Students', metric_cards: [{ label: 'Average marks', value: 70 }] }} />)
     expect(screen.getByText('Average marks')).toBeVisible()
