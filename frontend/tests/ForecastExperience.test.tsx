@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { DatasetContext } from '@/hooks/useDataset'
 import { ForecastExperience } from '@/pages/ml/RevenueForecast'
-import { getForecast } from '@/services/api'
-vi.mock('@/services/api', async original => ({ ...await original<typeof import('@/services/api')>(), getForecast: vi.fn() }))
+import { getForecast, getAnalyticsOverview } from '@/services/api'
+vi.mock('@/services/api', async original => ({ ...await original<typeof import('@/services/api')>(), getForecast: vi.fn(), getAnalyticsOverview: vi.fn() }))
+vi.mock('@/components/ForecastQuality', () => ({ default: () => <p>Offline quality evidence</p> }))
 vi.mock('@/components/BusinessEvidence', () => ({ default: () => null }))
 vi.mock('@/components/ForecastChart', () => ({ default: ({ points }: { points: unknown[] }) => <div data-testid="chart">{JSON.stringify(points)}</div> }))
 const filters = { date_to:'2025-01-30' }
@@ -17,11 +18,24 @@ afterEach(() => {cleanup();vi.clearAllMocks()})
 it('requests actual horizons with current filters and labels unavailable backtests', async () => {
   render(wrapper())
   await waitFor(() => expect(screen.getByTestId('chart')).toBeVisible())
+  expect(getForecast).toHaveBeenCalledWith(365,'orders',{})
+  fireEvent.change(screen.getByLabelText('Forecast horizon'), {target:{value:'30'}})
+  await waitFor(() => expect(getForecast).toHaveBeenLastCalledWith(30,'orders',{}))
+  expect(getForecast).toHaveBeenCalledWith(30,'orders',{})
+  fireEvent.change(screen.getByLabelText('Forecast origin mode'), {target:{value:'selected'}})
+  await waitFor(() => expect(getForecast).toHaveBeenLastCalledWith(30,'orders',filters))
   expect(getForecast).toHaveBeenCalledWith(30,'orders',filters)
   expect(screen.getByText(/No aligned out-of-sample/)).toBeVisible()
   fireEvent.change(screen.getByLabelText('Forecast horizon'), {target:{value:'7'}})
   await waitFor(() => expect(getForecast).toHaveBeenLastCalledWith(7,'orders',filters))
   await waitFor(() => expect(screen.getByText('Forecast total (7d)')).toBeVisible())
+})
+it('shows the serving response version and its evaluation caveat',async()=>{
+  vi.mocked(getForecast).mockResolvedValueOnce({...response(365),model:{algorithm:'Saved Linear Regression',version:'fixture-v1'},warnings:['Selected-data accuracy is unverified.']})
+  render(wrapper())
+  expect(await screen.findByText(/Saved Linear Regression.*fixture-v1/)).toBeVisible()
+  fireEvent.click(screen.getByText('Forecast provenance, coverage and quality warnings'))
+  expect(screen.getByText('Selected-data accuracy is unverified.')).toBeVisible()
 })
 it('clears the prior dataset while pending and rejects late responses', async () => {
   const view=render(wrapper())
@@ -44,4 +58,53 @@ it('does not draw invented data for not-applicable or inference errors', async (
   view.rerender(wrapper('b'))
   await waitFor(() => expect(screen.getByText('Artifact unavailable')).toBeVisible())
   expect(screen.queryByTestId('chart')).not.toBeInTheDocument()
+})
+it('latest mode removes only date filters and hides stale output while pending', async () => {
+  render(wrapper())
+  await screen.findByTestId('chart')
+  fireEvent.change(screen.getByLabelText('Forecast horizon'), {target:{value:'30'}})
+  await waitFor(() => expect(getForecast).toHaveBeenLastCalledWith(30,'orders',{}))
+  fireEvent.change(screen.getByLabelText('Forecast origin mode'), {target:{value:'selected'}})
+  await waitFor(() => expect(getForecast).toHaveBeenLastCalledWith(30,'orders',filters))
+  await screen.findByTestId('chart')
+  let resolve!: (value: ReturnType<typeof response>) => void
+  vi.mocked(getForecast).mockReturnValueOnce(new Promise(done => {resolve=done}))
+  fireEvent.change(screen.getByLabelText('Forecast origin mode'), {target:{value:'latest'}})
+  expect(screen.queryByTestId('chart')).not.toBeInTheDocument()
+  await waitFor(() => expect(getForecast).toHaveBeenLastCalledWith(30,'orders',{}))
+  resolve(response(30))
+  await screen.findByTestId('chart')
+  expect(screen.getByText(/Latest-data mode removes date filters/)).toBeVisible()
+  expect(screen.getByText(/Old data warning/)).toBeVisible()
+})
+it('shows history and the real registered scope when inference is unavailable, without selecting automatically',async()=>{
+  const select=vi.fn(async()=>{})
+  vi.mocked(getForecast).mockResolvedValueOnce({status:'not_applicable',reason:'Consecutive window missing',history_tail:[],forecast:[],historical_series:[{date:'2021-01-01',orders:3},{date:'2021-01-03',orders:2}],forecast_series:[],synthetic_registration:{status:'different_dataset',datasets:[{dataset_id:'registered',dataset_name:'Registered extended bundle',table:'Bundle overview'}]}})
+  render(<MemoryRouter><DatasetContext.Provider value={{active:dataset,datasets:[],busy:false,reload:async()=>{},select}}><ForecastExperience target="orders" /></DatasetContext.Provider></MemoryRouter>)
+  expect(await screen.findByText('Consecutive window missing')).toBeVisible()
+  expect(screen.getByTestId('chart')).toHaveTextContent('2021-01-01')
+  expect(screen.getByTestId('chart')).toHaveTextContent('"historical":null')
+  expect(select).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:'Select Registered extended bundle for forecasting'}))
+  expect(select).toHaveBeenCalledWith('registered')
+})
+it('uses the complete authorized chart series instead of the thirty-point input tail',async()=>{
+  const full=Array.from({length:60},(_,i)=>({date:new Date(Date.UTC(2024,11,2+i)).toISOString().slice(0,10),orders:i===5?null:i}))
+  vi.mocked(getForecast).mockResolvedValueOnce({...response(365),historical_series:full,forecast_series:response(365).forecast})
+  render(wrapper())
+  expect(await screen.findByTestId('chart')).toHaveTextContent('2024-12-02')
+  expect(screen.getByTestId('chart')).toHaveTextContent('2025-01-30')
+  expect(screen.getByText(/Historical points: 60; prediction points: 365/)).toBeVisible()
+})
+it('historical comparison aligns later actuals by date and never invents missing observations', async () => {
+  vi.mocked(getAnalyticsOverview).mockResolvedValueOnce({time_series:[{period:'2025-02-01',orders:42}]})
+  render(wrapper())
+  await screen.findByTestId('chart')
+  fireEvent.change(screen.getByLabelText('Forecast horizon'), {target:{value:'30'}})
+  await waitFor(() => expect(getForecast).toHaveBeenLastCalledWith(30,'orders',{}))
+  fireEvent.change(screen.getByLabelText('Forecast origin mode'), {target:{value:'historical'}})
+  expect(await screen.findByText('Historical comparison · not independent validation')).toBeVisible()
+  expect(getAnalyticsOverview).toHaveBeenCalledWith({date_from:'2025-01-31',date_to:'2025-03-01',grain:'day'})
+  expect(within(screen.getByText('Historical comparison · not independent validation').parentElement!).getByRole('row', {name:'2025-02-01 42 21'})).toBeVisible()
+  expect(screen.getAllByText('Unavailable')).toHaveLength(29)
 })

@@ -201,7 +201,7 @@ class BundleSource:
                 from sqlalchemy import cast,DateTime,extract
                 days=extract('epoch',cast(delivered,DateTime)-cast(self.oc['order_purchase_timestamp'],DateTime))/86400
             else: days=func.julianday(delivered)-func.julianday(self.oc['order_purchase_timestamp'])
-            expressions.append(func.avg(case((days>=0,days),else_=None)).label('delivery'))
+            expressions.append(func.avg(case(((self.oc['order_status']=='delivered') & (days>=0),days),else_=None)).label('delivery'))
             expressions.append(func.count(case(((self.oc['order_status']=='delivered') & (days>=0),1),else_=None)).label('completed_deliveries'))
         aggregate=self.rows(select(*expressions).select_from(self.order_base).where(*self.where))[0]
         n=aggregate['orders'];revenue=None;payments=None

@@ -99,14 +99,15 @@ def kpis(db: Session, f: Filters) -> dict:
             COALESCE(SUM(o.freight_value), 0) AS total_freight,
             COUNT(DISTINCT o.customer_unique_id) AS unique_customers,
             AVG(o.review_score) AS avg_review_score,
-            AVG(o.delivery_days) AS avg_delivery_days,
-            SUM(CASE WHEN o.delivered_customer_date IS NOT NULL
-                      AND o.order_status <> 'canceled' THEN 1 ELSE 0 END) AS delivered_orders,
+            AVG(CASE WHEN o.order_status = 'delivered' AND o.delivered_customer_date IS NOT NULL
+                      AND o.delivery_days >= 0 THEN o.delivery_days END) AS avg_delivery_days,
+            SUM(CASE WHEN o.order_status = 'delivered' THEN 1 ELSE 0 END) AS delivered_orders,
             SUM(CASE WHEN o.order_status = 'canceled' THEN 1 ELSE 0 END) AS cancelled_orders,
-            SUM(CASE WHEN o.delivered_customer_date IS NULL
-                      AND o.order_status <> 'canceled' THEN 1 ELSE 0 END) AS in_progress_orders,
-            SUM(CASE WHEN o.is_late THEN 1 ELSE 0 END) AS late_orders,
-            SUM(CASE WHEN o.is_late IS NOT NULL THEN 1 ELSE 0 END) AS orders_with_estimate,
+            SUM(CASE WHEN o.order_status NOT IN ('delivered', 'canceled') THEN 1 ELSE 0 END) AS in_progress_orders,
+            SUM(CASE WHEN o.order_status = 'delivered' AND o.delivery_days >= 0 AND o.delivered_customer_date IS NOT NULL
+                      AND o.is_late THEN 1 ELSE 0 END) AS late_orders,
+            SUM(CASE WHEN o.order_status = 'delivered' AND o.delivery_days >= 0 AND o.delivered_customer_date IS NOT NULL
+                      AND o.is_late IS NOT NULL THEN 1 ELSE 0 END) AS orders_with_estimate,
             SUM(CASE WHEN o.delivered_customer_date IS NOT NULL THEN 1 ELSE 0 END) AS orders_with_delivery
         FROM {order_from(f)}
         WHERE {where}
@@ -137,7 +138,7 @@ def kpis(db: Session, f: Filters) -> dict:
         SELECT COUNT(*) AS repeat_customers FROM (
             SELECT o.customer_unique_id
             FROM {order_from(f)}
-            WHERE {where}
+            WHERE {where} AND o.customer_unique_id IS NOT NULL
             GROUP BY o.customer_unique_id
             HAVING COUNT(*) >= 2
         ) t
@@ -176,7 +177,7 @@ def kpis(db: Session, f: Filters) -> dict:
     on_time_rate = _pct(with_estimate - late, with_estimate) if with_estimate else None
 
     median_sql, median_params = median_expr(
-        db, "o.delivery_days", where, from_sql=order_from(f), params=params
+        db, "o.delivery_days", f"({where}) AND {DELIVERY_SCOPE}", from_sql=order_from(f), params=params
     )
     median_days = db.execute(text(median_sql), median_params).scalar()
 
@@ -786,34 +787,22 @@ def sellers_by_state(db: Session, f: Filters, limit: int = 30) -> list[dict]:
 
 @dataset_metric
 def top_sellers_series(db: Session, f: Filters, top_n: int = 5, grain: str = "month", limit: int = 400) -> list[dict]:
-    """Monthly revenue of the current top-N sellers (sample-limited series)."""
+    """Rank on the complete filtered item scope before bounding chart points."""
     where, params = item_where(f)
-    rows = _rows(
-        db,
-        f"""
-        SELECT period, seller, revenue FROM (
+    return _rows(db, f"""
+        WITH leaders AS (
+            SELECT i.seller_id, SUM(i.price) AS revenue
+            FROM {item_from(f)} WHERE {where} AND i.seller_id IS NOT NULL
+            GROUP BY i.seller_id ORDER BY revenue DESC, i.seller_id LIMIT :top_n
+        )
+        SELECT period, seller, ROUND(revenue, 2) AS revenue FROM (
             SELECT {period_expr(db, "i.purchase_date", grain)} AS period,
-                   SUBSTR(i.seller_id, 1, 8) AS seller,
-                   COALESCE(SUM(i.price), 0) AS revenue
-            FROM {item_from(f)}
+                   i.seller_id AS seller, SUM(i.price) AS revenue
+            FROM {item_from(f)} JOIN leaders ON leaders.seller_id = i.seller_id
             WHERE {where}
-            GROUP BY period, i.seller_id
-            ORDER BY period DESC
-            LIMIT :limit
-        ) t
-        ORDER BY period ASC
-        """,
-        {**params, "limit": limit},
-    )
-    totals: dict[str, float] = {}
-    for r in rows:
-        totals[r["seller"]] = totals.get(r["seller"], 0.0) + float(r["revenue"] or 0)
-    keep = {s for s, _ in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:top_n]}
-    return [
-        {"period": r["period"], "seller": r["seller"], "revenue": round(float(r["revenue"] or 0), 2)}
-        for r in rows
-        if r["seller"] in keep
-    ]
+            GROUP BY period, i.seller_id ORDER BY period DESC, i.seller_id LIMIT :limit
+        ) chart_points ORDER BY period, seller
+        """, {**params, "top_n": top_n, "limit": limit})
 
 
 # ---------------------------------------------------------------------------
@@ -821,7 +810,7 @@ def top_sellers_series(db: Session, f: Filters, top_n: int = 5, grain: str = "mo
 # ---------------------------------------------------------------------------
 
 DELIVERY_SCOPE = (
-    "o.delivered_customer_date IS NOT NULL AND o.order_status <> 'canceled'"
+    "o.delivered_customer_date IS NOT NULL AND o.order_status = 'delivered' AND o.delivery_days >= 0"
 )
 
 
@@ -937,23 +926,31 @@ def delivery_metrics(db: Session, f: Filters) -> dict:
         r["avg_delivery_days"] = _round(r["avg_delivery_days"], 2)
         r["on_time_rate"] = _pct(est - int(r["late_orders"] or 0), est) if est else None
 
+    # Membership is distinct per order/group before joining delivery facts.
+    # Multiple items from one seller/category must not weight that order's
+    # duration or lateness more heavily than another eligible order.
+    iwhere, iparams = item_where(f)
+    seller_membership = f"""SELECT DISTINCT i.order_id, i.seller_id,
+        COALESCE(s.seller_state, 'unknown') AS state
+        FROM {item_from(f, with_seller=True)} WHERE {iwhere}"""
     by_seller = _rows(
         db,
         f"""
-        SELECT SUBSTR(i.seller_id, 1, 8) AS seller,
-               COALESCE(s.seller_state, 'unknown') AS state,
-               COUNT(DISTINCT i.order_id) AS orders,
+        SELECT SUBSTR(membership.seller_id, 1, 8) AS seller,
+               membership.state AS state,
+               COUNT(*) AS orders,
                AVG(o.delivery_days) AS avg_delivery_days,
                SUM(CASE WHEN o.is_late THEN 1 ELSE 0 END) AS late_orders,
                SUM(CASE WHEN o.is_late IS NOT NULL THEN 1 ELSE 0 END) AS orders_with_estimate
-        FROM {item_from(f, with_order=True, with_seller=True)}
+        FROM {order_from(f)}
+        JOIN ({seller_membership}) membership ON membership.order_id = o.order_id
         WHERE {scope}
-        GROUP BY i.seller_id, s.seller_state
-        HAVING COUNT(DISTINCT i.order_id) >= 20
+        GROUP BY membership.seller_id, membership.state
+        HAVING COUNT(*) >= 20
         ORDER BY orders DESC
         LIMIT 50
         """,
-        params,
+        {**params, **iparams},
     )
     for r in by_seller:
         est = int(r["orders_with_estimate"] or 0)
@@ -961,21 +958,25 @@ def delivery_metrics(db: Session, f: Filters) -> dict:
         r["avg_delivery_days"] = _round(r["avg_delivery_days"], 2)
         r["on_time_rate"] = _pct(est - int(r["late_orders"] or 0), est) if est else None
 
+    category_membership = f"""SELECT DISTINCT i.order_id,
+        COALESCE(i.product_category_name_en, 'unknown') AS category
+        FROM {item_from(f)} WHERE {iwhere}"""
     by_category = _rows(
         db,
         f"""
-        SELECT COALESCE(i.product_category_name_en, 'unknown') AS category,
-               COUNT(DISTINCT i.order_id) AS orders,
+        SELECT membership.category AS category,
+               COUNT(*) AS orders,
                AVG(o.delivery_days) AS avg_delivery_days,
                SUM(CASE WHEN o.is_late THEN 1 ELSE 0 END) AS late_orders,
                SUM(CASE WHEN o.is_late IS NOT NULL THEN 1 ELSE 0 END) AS orders_with_estimate
-        FROM {item_from(f, with_order=True)}
+        FROM {order_from(f)}
+        JOIN ({category_membership}) membership ON membership.order_id = o.order_id
         WHERE {scope}
         GROUP BY category
         ORDER BY orders DESC
         LIMIT 20
         """,
-        params,
+        {**params, **iparams},
     )
     for r in by_category:
         est = int(r["orders_with_estimate"] or 0)
@@ -1064,7 +1065,7 @@ def customers(db: Session, f: Filters) -> dict:
         "top_customers": top_customers(db, f),
         "top_states": top_customer_states(db, f),
         "new_vs_repeat": [
-            {"segment": "New customers", "customers": k["new_customers"]},
+            {"segment": "Single-purchase customers", "customers": unique - repeat},
             {"segment": "Repeat customers", "customers": repeat},
         ],
     }
@@ -1074,11 +1075,16 @@ def customers(db: Session, f: Filters) -> dict:
 def products(db: Session, f: Filters) -> dict:
     k = kpis(db, f)
     category_rows = products_by_category(db, f)
+    where, params = item_where(f)
+    category_count = db.scalar(text(
+        f"SELECT COUNT(DISTINCT COALESCE(i.product_category_name_en, 'unknown')) "
+        f"FROM {item_from(f)} WHERE {where}"
+    ), params)
     quantity = k["items_sold"]
     return {
         "kpis": {
             **k,
-            "category_count": len(category_rows),
+            "category_count": category_count,
             "catalog": catalog_stats(db),
             "avg_product_revenue": round(k["total_revenue"] / k["products_sold"], 2)
             if k["products_sold"]

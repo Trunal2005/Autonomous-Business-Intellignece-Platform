@@ -35,7 +35,15 @@ test('active Olist ML, real forecast UI, network health and logout remain author
   const scoped = { ...headers, 'X-Dataset-ID': reference.dataset_id }
   const response = page.waitForResponse(r => r.url().includes('/api/ml/forecast?'))
   await page.goto('/ml/revenue-forecast' + windowQuery)
-  const forecastResponse = await response
+  const latestResponse = await response
+  expect(latestResponse.status()).toBe(200)
+  expect(latestResponse.url()).not.toContain('date_to=')
+  expect((await latestResponse.json()).forecast).toHaveLength(365)
+  await page.getByLabel('Forecast horizon').selectOption('30')
+  await expect(page.getByTestId('forecast-chart')).toHaveAttribute('data-forecast-points','30')
+  const scopedResponse = page.waitForResponse(r => r.url().includes('/api/ml/forecast?') && r.url().includes('date_to=2018-01-31'))
+  await page.getByLabel('Forecast origin mode').selectOption('selected')
+  const forecastResponse = await scopedResponse
   expect(forecastResponse.status()).toBe(200)
   const forecast = await forecastResponse.json()
   expect(forecast.status).toBe('available')
@@ -47,7 +55,7 @@ test('active Olist ML, real forecast UI, network health and logout remain author
   expect(forecast.forecast.every((p: { revenue: number }) => Number.isFinite(p.revenue))).toBe(true)
   await expect(page.getByText('Model: Linear Regression (Daily)', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Forecast Data Table' })).toBeVisible()
-  await expect(page.locator('main tbody tr')).toHaveCount(30)
+  await expect(page.getByRole('table', {name:'Forecast data', exact:true}).locator('tbody tr')).toHaveCount(30)
   await expect(page.getByText('GradientBoostingRegressor')).toHaveCount(0)
 
   // Exercise all existing model families through the same real scoped API.

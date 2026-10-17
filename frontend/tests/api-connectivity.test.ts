@@ -36,12 +36,16 @@ describe('shared API transport and ML connection contracts', () => {
       .mockResolvedValueOnce(new Response('{"access_token":"fresh"}', { status: 200 }))
       .mockResolvedValueOnce(new Response('region,revenue\nPune,200\n', { status: 200, headers: { 'Content-Type': 'text/csv' } }))
     vi.stubGlobal('fetch', fetch)
+    vi.useFakeTimers()
     await downloadReport('dataset_rows', { column_filters: '{"region":"Pune"}' })
     expect(fetch.mock.calls[1][0]).toContain('/api/auth/refresh')
     expect(fetch.mock.calls[2][1].headers.Authorization).toBe('Bearer fresh')
     expect(fetch.mock.calls[2][1].headers['X-Dataset-ID']).toBe('selected')
     expect(URL.createObjectURL).toHaveBeenCalledOnce()
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce()
+    vi.runOnlyPendingTimers()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test')
+    vi.useRealTimers()
   })
 
   it('does not download old-user data when logout happens during CSV body decoding', async () => {
@@ -73,8 +77,11 @@ describe('shared API transport and ML connection contracts', () => {
   it('keeps the chosen report authoritative over a conflicting filter parameter', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('csv', { status: 200 }))
     vi.stubGlobal('fetch', fetch)
+    vi.useFakeTimers()
     await downloadReport('kpis', { report: 'dataset_rows' })
     expect(fetch.mock.calls[0][0]).toContain('report=kpis')
     expect(fetch.mock.calls[0][0]).not.toContain('report=dataset_rows')
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
   })
 })

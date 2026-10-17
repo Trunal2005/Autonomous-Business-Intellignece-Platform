@@ -166,11 +166,13 @@ class TabularSource:
             from app.analytics.filters import date_diff_expr
             date, delivered = self.field("date"), self.field("delivery_date")
             difference = literal_column(date_diff_expr(self.db, f"{self.table.name}.{delivered.name}", f"{self.table.name}.{date.name}"))
-            delivery = self.rows(self.statement(func.count(delivered).label("delivered_rows"), func.avg(difference).label("average_days")))[0]
+            from sqlalchemy import case
+            valid = delivered.is_not(None) & date.is_not(None) & (difference >= 0)
+            delivery = self.rows(self.statement(func.count(case((valid, 1))).label("delivered_rows"),
+                                                func.avg(case((valid, difference))).label("average_days")))[0]
             estimated = self.field("estimated_date")
             if estimated is not None:
-                from sqlalchemy import case
-                delivery["on_time_percentage"] = self.scalar(func.avg(case((delivered.is_(None) | estimated.is_(None), None),
+                delivery["on_time_percentage"] = self.scalar(func.avg(case((~valid | estimated.is_(None) | (estimated < date), None),
                                                                              (delivered <= estimated, 100.0), else_=0.0)))
             cards.extend({"label": name.replace("_", " "), "value": value} for name, value in delivery.items())
         return {"dataset_id": self.ds.id, "dataset_name": self.ds.name, "status": "available", "section": section,

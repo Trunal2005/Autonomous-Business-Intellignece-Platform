@@ -129,7 +129,7 @@ def forecast(periods: int = 30, target: str = "orders", db=None, f=None) -> dict
     import numpy as np
     import pandas as pd
 
-    if target not in {"orders", "revenue"} or not 1 <= periods <= 90:
+    if target not in {"orders", "revenue"} or not 1 <= periods <= 366:
         raise ValueError("Invalid forecast target or horizon.")
     if db is None:
         raise ValueError("Dataset context is required for inference.")
@@ -152,24 +152,23 @@ def forecast(periods: int = 30, target: str = "orders", db=None, f=None) -> dict
     last_date = hist.index.max()
     values = list(hist.values)
 
-    preds = []
-    for step in range(periods):
-        window = np.array(values, dtype=float)
-        feats = {
-            "lag1": window[-1],
-            "lag7": window[-7],
-            "lag14": window[-14],
-            "lag30": window[-30],
-            "roll7": window[-7:].mean(),
-            "roll30": window[-30:].mean(),
-        }
-        row = pd.DataFrame([[feats[c] for c in feature_cols]], columns=feature_cols)
-        yhat = float(model.predict(row)[0])
-        if not np.isfinite(yhat):
-            raise ValueError("Model returned a non-finite prediction.")
-        values.append(yhat)
-        preds.append({"date": (last_date + pd.Timedelta(days=step + 1)).strftime("%Y-%m-%d"), target: round(yhat, 2)})
-    return {"history_tail": [{"date": d.strftime("%Y-%m-%d"), target: float(v)} for d, v in list(hist.items())[-30:]], "forecast": preds}
+    from app.services.model_audit import recursive_values
+    predictions = recursive_values(model, feature_cols, values, periods)
+    preds = [{"date": (last_date + pd.Timedelta(days=step + 1)).strftime("%Y-%m-%d"), target: round(value, 2)}
+             for step, value in enumerate(predictions)]
+    meta = load_all_metadata().get(f'sales_forecast_{target}', {})
+    return {"history_tail": [{"date": d.strftime("%Y-%m-%d"), target: float(v)} for d, v in list(hist.items())[-30:]],
+            "forecast": preds, "forecast_origin": last_date.strftime('%Y-%m-%d'),
+            "horizon": periods, "frequency": "daily",
+            "data_coverage": {"from": hist.index.min().strftime('%Y-%m-%d'),
+                              "to": last_date.strftime('%Y-%m-%d'), "observed_days": len(hist)},
+            "evaluation_status": "Selected-dataset forecast quality is unqualified; inspect separate offline evidence.",
+            "target_definition": 'Daily distinct matching orders' if target == 'orders' else 'Daily qualifying item revenue, excluding freight',
+            "unit": 'orders' if target == 'orders' else db.info['dataset'].semantics.get('currency_code'),
+            "model": {"name": meta.get('name'), "version": meta.get('version'), "algorithm": meta.get('algorithm')},
+            "training_cutoff": None,
+            "warnings": ['Original fit cutoff is not persisted; inspect the model audit for reconstructed offline evaluation.',
+                         'Offline one-step scores do not establish multi-day or selected-dataset accuracy. No calibrated interval is available.']}
 
 
 def anomalies(db=None, f=None) -> dict:
@@ -296,13 +295,13 @@ def _product_predictions(df, bundle):
     df["qty_log"] = np.log1p(df["total_qty"].clip(lower=0))
     df["revenue_log"] = np.log1p(df["total_revenue"].clip(lower=0))
 
-    # Impute missing values with medians (if dataset medians were saved, we'd use them, but here we just use batch median)
-    df["product_weight_g"] = df["product_weight_g"].fillna(df["product_weight_g"].median())
-    df["avg_price"] = df["avg_price"].fillna(df["avg_price"].median())
+    if not np.isfinite(df[['total_qty', 'total_revenue', 'avg_price']].to_numpy(dtype=float)).all() or (df[['total_qty', 'total_revenue', 'avg_price']] < 0).any().any():
+        raise ValueError('Product inputs must be finite and nonnegative.')
 
-    # Handle the case where batch median is still NaN
-    df["product_weight_g"] = df["product_weight_g"].fillna(0)
-    df["avg_price"] = df["avg_price"].fillna(0)
+    # This saved artifact has no fitted imputer. A current-batch median (or
+    # zero) would change preprocessing when filters/datasets change.
+    if df[["product_weight_g", "avg_price"]].isna().any().any():
+        raise ValueError("Training imputation statistics are unavailable; complete product weight and price inputs are required.")
 
     X = df[features].astype(float)
     Xs = scaler.transform(X)
@@ -363,6 +362,30 @@ def predict_sales(payload: dict) -> dict:
     return {"predicted_item_revenue": round(yhat, 2), "currency": "BRL"}
 
 
+def daily_readiness(points, targets):
+    """Profile observed calendar coverage without filling or inventing days."""
+    import pandas as pd
+    import numpy as np
+    if not points:
+        return {'observations': 0, 'from': None, 'to': None, 'missing_calendar_days': 0,
+                'latest_window_consecutive': False, 'invalid_targets': [], 'zero_targets': {}}
+    dates = pd.to_datetime([point['period'] for point in points], errors='coerce', utc=True)
+    valid_dates = dates[~dates.isna()]
+    ordered = valid_dates.sort_values()
+    latest = ordered[-30:]
+    invalid, zero = [], {}
+    for target in targets:
+        values = pd.to_numeric(pd.Series([point.get(target) for point in points]), errors='coerce').to_numpy(dtype=float)
+        if not np.isfinite(values).all() or (values < 0).any(): invalid.append(target)
+        zero[target] = int((values == 0).sum())
+    return {'observations': len(points), 'from': str(ordered.min().date()) if len(ordered) else None,
+            'to': str(ordered.max().date()) if len(ordered) else None,
+            'invalid_dates': int(dates.isna().sum()), 'duplicate_dates': int(valid_dates.duplicated().sum()),
+            'missing_calendar_days': len(pd.date_range(ordered.min(), ordered.max()).difference(ordered)) if len(ordered) else 0,
+            'latest_window_consecutive': len(latest) >= 30 and bool(((latest[1:]-latest[:-1]).days == 1).all()),
+            'invalid_targets': invalid, 'zero_targets': zero}
+
+
 def compatibility(name, db, f=None):
     """Contracts describe trained-domain validity separately from availability."""
     from app.analytics.filters import Filters
@@ -391,8 +414,8 @@ def compatibility(name, db, f=None):
         for role,table,column in checks:
             if role in required and table in source.tables:
                 profile=next((c for c in source.tables[table][0].profile['columns'] if c['name']==column),None)
-                if profile and profile['missing'] and role!='weight_g': reasons.append(f'Required {role} contains missing values. Review table quality before inference.')
-                if profile and profile.get('statistics',{}).get('min',0)<0: reasons.append(f'Required {role} contains negative values outside the trained contract.')
+                if profile and profile['missing']: reasons.append(f'Required {role} contains missing values; no fitted training imputation is available. Review table quality before inference.')
+                if profile and (profile.get('statistics',{}).get('min') or 0)<0: reasons.append(f'Required {role} contains negative values outside the trained contract.')
     elif ds.adapter == "tabular":
         from app.analytics.tabular import TabularSource
         source = TabularSource(db, f)
@@ -411,16 +434,20 @@ def compatibility(name, db, f=None):
                 reasons.append(f"Required {role} contains missing values; correct the dataset before inference.")
             if column and role in {"revenue", "price", "quantity", "weight_g"} and column.get("statistics", {}).get("min", 0) < 0:
                 reasons.append(f"The {role} field contains negative values outside the trained feature contract.")
+    readiness = None
     if not reasons:
         if contract.get("frequency") == "daily":
-            import pandas as pd
             points = metrics.time_series(db, f or Filters(), "day", limit=100_000)
+            targets = [name.removeprefix('sales_forecast_')] if name.startswith('sales_forecast_') else ['orders', 'revenue']
+            readiness = daily_readiness(points, targets)
             if len(points) < contract.get("minimum_observations", 1):
                 reasons.append(f"At least {contract.get('minimum_observations')} daily observations are required after filtering.")
-            else:
-                dates = pd.to_datetime([p["period"] for p in points][-30:])
-                if len(dates) > 1 and not ((dates[1:] - dates[:-1]).days == 1).all():
-                    reasons.append("The latest 30 daily observations must be consecutive; missing days cannot be assumed to be zero.")
+            elif name.startswith('sales_forecast_') and not readiness['latest_window_consecutive']:
+                reasons.append("The latest 30 daily observations must be consecutive; missing days cannot be assumed to be zero.")
+            if readiness.get('invalid_dates') or readiness.get('duplicate_dates'):
+                reasons.append('Daily observations contain invalid or duplicate dates.')
+            if readiness['invalid_targets']:
+                reasons.append('Daily targets contain missing, non-finite or negative values: '+', '.join(readiness['invalid_targets']))
         else:
             if getattr(ds,'source_type',None) == 'bundle':
                 from sqlalchemy import func
@@ -437,7 +464,7 @@ def compatibility(name, db, f=None):
                 reasons.append("No observations match the selected filters.")
     return {"compatible": not reasons, "reasons": reasons, "contract": contract,
             "training_domain": contract.get("training_domain"), "dataset_id": ds.id,
-            "artifact_available": artifact_available(name)}
+            "artifact_available": artifact_available(name), "readiness": readiness}
 
 
 def validate_output(value):

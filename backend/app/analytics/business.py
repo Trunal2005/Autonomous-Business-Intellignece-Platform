@@ -49,7 +49,7 @@ def _recommend(domain, ident, title, observation, action, window, evidence, limi
                 limitations=limitation, metric_source='Authorized selected data; SQL aggregates')
 
 
-def evidence(db, f, domain):
+def evidence(db, f, domain, *, materialize=False):
     ds = db.info['dataset']
     result = dict(dataset_id=ds.id, domain=domain, status='available', cards=[], series=[], rankings=[],
                   recommendations=[], limitations=[], currency_code=ds.semantics.get('currency_code'),
@@ -95,14 +95,25 @@ def evidence(db, f, domain):
     o, source = _orders(db, f, with_revenue=domain != 'sellers')
     if o is None:
         return {**result, 'status':'not_applicable', 'limitations':['This analysis requires a validated Olist bundle or order-grain reference warehouse. Select the bundle overview.']}
-    bounds = db.execute(select(func.min(o.c.purchased), func.max(o.c.purchased))).one()
+    if materialize:
+        # Report-only execution hint: reuse the same order-grain result within
+        # each SQL statement. This avoids correlated re-expansion on the large
+        # extended bundle, without changing formulas, filters or populations.
+        o = select(o).cte('report_scoped_orders')
+        if db.get_bind().dialect.name == 'sqlite': o = o.prefix_with('MATERIALIZED')
+    counting_orders = o
+    if materialize and domain == 'customers':
+        counting_orders, _ = _orders(db, f, with_revenue=False)
+        counting_orders = select(counting_orders).cte('report_customer_counts')
+        if db.get_bind().dialect.name == 'sqlite': counting_orders = counting_orders.prefix_with('MATERIALIZED')
+    bounds = db.execute(select(func.min(counting_orders.c.purchased), func.max(counting_orders.c.purchased))).one()
     window = f'{bounds[0]} to {bounds[1]} (matching purchase dates)'
     result['measurement_window'] = window
     if domain == 'customers':
         if source is not None and not source.enabled('orders', 'customers'):
             return {**result, 'status':'not_applicable', 'limitations':['A validated stable customer_unique_id relationship is required. Transaction customer_id is not treated as a person.']}
-        customers = select(o.c.customer, func.count(func.distinct(o.c.oid)).label('n')).where(
-            o.c.customer.is_not(None), o.c.purchased.is_not(None)).group_by(o.c.customer).subquery()
+        customers = select(counting_orders.c.customer, func.count(func.distinct(counting_orders.c.oid)).label('n')).where(
+            counting_orders.c.customer.is_not(None), counting_orders.c.purchased.is_not(None)).group_by(counting_orders.c.customer).subquery()
         counts = db.execute(select(func.count(), func.sum(case((customers.c.n >= 2, 1), else_=0)))).one()
         n, repeat = counts[0], counts[1] or 0
         result['cards'] = [dict(label='Observed customers', value=n), dict(label='Repeat customers', value=repeat),
@@ -110,6 +121,9 @@ def evidence(db, f, domain):
         result['frequency'] = _rows(db, select(customers.c.n.label('orders'), func.count().label('customers')).group_by(customers.c.n).order_by(customers.c.n).limit(100))
         # First purchase is established on the complete dataset, before date/dimension filters.
         all_orders, _ = _orders(db, Filters(), with_revenue=False)
+        if materialize:
+            all_orders = select(all_orders).cte('report_order_history')
+            if db.get_bind().dialect.name == 'sqlite': all_orders = all_orders.prefix_with('MATERIALIZED')
         first = select(all_orders.c.customer, func.min(all_orders.c.purchased).label('first')).where(
             all_orders.c.customer.is_not(None), all_orders.c.purchased.is_not(None)).group_by(all_orders.c.customer).subquery()
         joined = o.join(first, o.c.customer == first.c.customer)

@@ -88,6 +88,7 @@ export default function Sellers() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="abi-panel p-4 rounded-lg border border-neutral-800">
           <h2 className="mb-3 font-medium">Top Sellers Revenue Over Time</h2>
+          <p className="text-xs text-neutral-400 mb-3">Leaders ranked across all selected item revenue; up to 400 latest seller-period points shown. Missing points are not zero.</p>
           {seriesByPeriod && seriesByPeriod.length > 0 ? (
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={seriesByPeriod}>

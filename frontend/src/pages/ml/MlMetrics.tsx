@@ -6,6 +6,7 @@ import {
 } from '@/services/api'
 import { useFilters } from '@/hooks/useFilters'
 import FilterBar from '@/components/FilterBar'
+import ModelAudit from '@/components/ModelAudit'
 import { Link } from 'react-router-dom'
 import { ForecastExperience } from './RevenueForecast'
 import { useDataset } from '@/hooks/useDataset'
@@ -102,6 +103,8 @@ export default function MlMetrics() {
                       })}
                     </div></details>
                   )}
+
+                  {m.name !== 'abi_gradient_boosting_revenue' && <ModelAudit name={m.name} />}
 
                   <div className="text-xs text-neutral-500 mt-3 flex flex-wrap gap-2 justify-between">
                     <span>Artifact: {m.artifact_available ? 'Present' : 'Missing'} · Inference runs on the task page</span>

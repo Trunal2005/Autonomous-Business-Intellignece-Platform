@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.analytics.filters import Filters, analytics_filters
 from app.database.deps import get_db
 from app.services import ml as ml_service
+from app.api.deps import require_bi_user
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ def ml_status(db=Depends(get_db), f=Depends(analytics_filters)):
     for feature in features:
         for model in feature["models"]:
             model["compatibility"] = ml_service.compatibility(model["name"], db, f)
-            model["metrics_scope"] = "Offline training/evaluation on Olist; not an evaluation of the selected dataset."
+            model["metrics_scope"] = "Recorded offline evaluation on documented training-source files, not the selected dataset. Real/synthetic composition and original fit logs are unverified."
     candidates = []
     candidate_path = ml_service.REPO_ROOT / 'ml/candidates/abi-revenue/provenance.json'
     if candidate_path.is_file():
@@ -47,11 +48,16 @@ def ml_model_detail(name: str, db=Depends(get_db), f=Depends(analytics_filters))
     meta = ml_service.load_all_metadata().get(name)
     if not meta:
         raise HTTPException(status_code=404, detail=f"model '{name}' not found")
-    return {**meta, "compatibility": ml_service.compatibility(name, db, f)}
+    from app.services.model_audit import audit_model
+    from app.services.forecast_quality import candidate_evidence
+    from app.services.synthetic_forecast import selected_evidence
+    return {**meta, "compatibility": ml_service.compatibility(name, db, f), "audit": audit_model(name),
+            "candidate_evidence": candidate_evidence(name),
+            "selected_synthetic_forecast": selected_evidence(db, name.removeprefix('sales_forecast_')) if name.startswith('sales_forecast_') else None}
 
 
-def _infer(name, db, f, function):
-    check = ml_service.compatibility(name, db, f)
+def _infer(name, db, f, function, check_override=None):
+    check = check_override if check_override is not None else ml_service.compatibility(name, db, f)
     if not check["compatible"]:
         return {"status": "not_applicable", "reason": " ".join(check["reasons"]), "compatibility": check,
                 "dataset_id": db.info["dataset"].id}
@@ -66,12 +72,33 @@ def _infer(name, db, f, function):
 
 
 @router.get("/forecast")
-def ml_forecast(periods: int = 30, target: str = "orders", db=Depends(get_db), f=Depends(analytics_filters)):
-    if not (1 <= periods <= 90):
-        raise HTTPException(status_code=400, detail="periods must be between 1 and 90")
+def ml_forecast(periods: int = 30, target: str = "orders", db=Depends(get_db), f=Depends(analytics_filters), user=Depends(require_bi_user)):
+    # One calendar year can contain 366 days; recursion remains bounded.
+    if not (1 <= periods <= 366):
+        raise HTTPException(status_code=400, detail="periods must be between 1 and 366")
     if target not in ("orders", "revenue"):
         raise HTTPException(status_code=400, detail="target must be orders or revenue")
-    return _infer(f"sales_forecast_{target}", db, f, lambda: ml_service.forecast(periods, target, db, f))
+    from app.services import synthetic_forecast
+    registration = synthetic_forecast.registered_scopes(db,user['username'])
+    try:
+        chart = synthetic_forecast.chart_history(db,f,target)
+    except HTTPException as error:
+        if error.status_code not in (409,422): raise
+        chart = {'historical_series':[],'historical_coverage':None,'history_reason':str(error.detail)}
+    except (ValueError,KeyError,TypeError):
+        raise HTTPException(422,'Selected history contains invalid or duplicate daily target observations; no chart or substitute forecast was returned.') from None
+    check = synthetic_forecast.compatibility(db, f, target)
+    if check is not None:
+        result = _infer(f'synthetic_{target}', db, f,
+            lambda: synthetic_forecast.forecast(db, f, target, periods), check_override=check)
+    else:
+        result = _infer(f"sales_forecast_{target}", db, f, lambda: ml_service.forecast(periods, target, db, f))
+    if result.get('status') == 'available' and periods > 90:
+        result['warnings'] = [*result.get('warnings',[]),
+            'Long-horizon experimental output: annual forecast accuracy has not been validated. Recursive errors may accumulate beyond the evaluated 7/14/30/90-day horizons.']
+    return {**result,**chart,'forecast_series':result.get('forecast',[]),
+        'selected_scope':{'dataset_id':db.info['dataset'].id,'dataset_name':db.info['dataset'].name},
+        'synthetic_registration':registration}
 
 
 @router.get("/segments/customers")

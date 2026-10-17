@@ -279,10 +279,23 @@ export function getMlStatus(params: Record<string, string> = {}) {
   return getJson<{ features: MlFeature[]; source_candidates?: MlFeature[] }>(`/api/ml/status?${new URLSearchParams(modelParams(params))}`)
 }
 
+export function getModelDetail(name: string, params: Record<string, string> = {}) {
+  return getJson<any>(`/api/ml/models/${encodeURIComponent(name)}?${new URLSearchParams(modelParams(params))}`)
+}
+
 export interface ForecastPoint {
   date: string
-  orders?: number
-  revenue?: number
+  orders?: number | null
+  revenue?: number | null
+}
+
+export interface ForecastResponse {
+  history_tail: ForecastPoint[]; forecast: ForecastPoint[]; historical_series?: ForecastPoint[]; forecast_series?: ForecastPoint[]
+  historical_coverage?: {from:string;to:string;calendar_positions:number;recorded_days:number;missing_dates:number;unknown_target_days:number;missing_target_positions:number;zero_filled:number} | null
+  status?: string; reason?: string; model?: {name?:string;version?:string;algorithm?:string}; warnings?:string[]
+  synthetic?:boolean; unit?:string; forecast_origin?:string; data_coverage?:{from:string;to:string;observed_days:number}
+  synthetic_registration?:{status:string;datasets:{dataset_id:string;dataset_name:string;table:string}[]}
+  selected_scope?:{dataset_id:string;dataset_name:string}
 }
 
 export interface BusinessEvidenceResponse {
@@ -300,7 +313,7 @@ export function getBusinessEvidence(domain: 'revenue' | 'customers' | 'sellers',
 }
 
 export function getForecast(periods = 30, target: 'orders' | 'revenue' = 'orders', params: Record<string, string> = {}) {
-  return getJson<{ history_tail: ForecastPoint[]; forecast: ForecastPoint[]; status?: string; reason?: string }>(
+  return getJson<ForecastResponse>(
     `/api/ml/forecast?${new URLSearchParams({ ...modelParams(params), periods: String(periods), target })}`,
   )
 }
@@ -413,6 +426,27 @@ export function queryInsights(question: string, context_limit = 20, params: Reco
 }
 
 // ---- Reports ----
+
+export async function downloadBusinessReport(params: Record<string, string> = {}) {
+  const context = getRequestContext()
+  const response = await requestResponse(`/api/reports/business-sales.docx?${new URLSearchParams(params)}`, {}, true, context)
+  if (!response.headers.get('Content-Type')?.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) {
+    throw new Error('The server did not return a Word document. Retry the report.')
+  }
+  const blob = await response.blob()
+  ensureContext(context, 'Dataset or session changed; report discarded.')
+  const signature = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
+  ensureContext(context, 'Dataset or session changed; report discarded.')
+  if (signature.length !== 4 || signature[0] !== 80 || signature[1] !== 75 || signature[2] !== 3 || signature[3] !== 4) {
+    throw new Error('The returned document package is invalid. Retry the report.')
+  }
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url; link.download = 'business-sales-analysis.docx'
+  document.body.appendChild(link); link.click(); link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  return { filename: 'business-sales-analysis.docx', bytes: blob.size, generatedAt: new Date().toISOString() }
+}
 
 export async function downloadReport(report: string, params: Record<string, string> = {}) {
   const context = getRequestContext()

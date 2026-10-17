@@ -21,7 +21,12 @@ test('analytics chart grain cannot break daily ML requests or discard date filte
   expect(catalog.url()).toContain('date_from=2018-01-01')
   const response = page.waitForResponse(r => r.url().includes('/api/ml/forecast?') && r.url().includes('target=orders'))
   await page.getByRole('link', { name: 'Order Forecast', exact: true }).click()
-  const forecast = await response
+  const latest = await response
+  expect(latest.status()).toBe(200)
+  expect(latest.url()).not.toContain('date_to=')
+  const scoped = page.waitForResponse(r => r.url().includes('/api/ml/forecast?') && r.url().includes('date_to=2018-01-31'))
+  await page.getByLabel('Forecast origin mode').selectOption('selected')
+  const forecast = await scoped
   expect(forecast.status()).toBe(200)
   expect(forecast.url()).not.toContain('grain=')
   expect((await forecast.json()).forecast[0].date).toBe('2018-02-01')
@@ -77,7 +82,9 @@ test('newly connected active ML screens render real backend responses', async ({
   expect((await orders).status()).toBe(200)
   await expect(page.getByRole('heading', { name: 'Order Forecast', exact: true })).toBeVisible()
   await expect(page.getByText('Latest Actual Orders', { exact: true })).toBeVisible()
-  await expect(page.locator('main tbody tr')).toHaveCount(30)
+  await expect(page.getByRole('table', {name:'Forecast data', exact:true}).locator('tbody tr')).toHaveCount(365)
+  await page.getByLabel('Forecast horizon').selectOption('30')
+  await expect(page.getByRole('table', {name:'Forecast data', exact:true}).locator('tbody tr')).toHaveCount(30)
   const customerResponse = page.waitForResponse(r => r.url().includes('/api/ml/segments/customers'))
   await page.getByRole('link', { name: 'Customer Segments', exact: true }).click()
   const customer = await customerResponse

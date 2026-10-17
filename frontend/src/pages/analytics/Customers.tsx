@@ -112,7 +112,8 @@ export default function Customers() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="abi-panel p-4 rounded-lg border border-neutral-800">
-          <h2 className="mb-3 font-medium">New vs Repeat</h2>
+          <h2 className="mb-3 font-medium">Single-purchase vs repeat customers</h2>
+          <p className="text-xs text-neutral-400 mb-3">Disjoint groups within the selected filters. Repeat means at least two matching orders; first-time acquisition is a separate measure.</p>
           <div className="flex h-[250px]">
             {new_vs_repeat && new_vs_repeat.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">

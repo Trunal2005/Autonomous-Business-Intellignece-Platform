@@ -1,7 +1,7 @@
 import type { ForecastPoint } from './api'
 
 export type ForecastTarget = 'orders' | 'revenue'
-export interface ChartPoint { time: number; date: string; historical: number | null; forecast: number | null }
+export interface ChartPoint { time: number; date: string; historical: number | null; forecast: number | null; kind?: 'historical' | 'forecast' }
 const DAY = 86400000
 
 /** Fail closed rather than invent zeros, deduplicate ambiguously or align by index. */
@@ -23,6 +23,46 @@ export function forecastPoints(history: ForecastPoint[], future: ForecastPoint[]
 }
 
 export const forecastDate = (time: number) => new Date(time).toISOString().slice(0, 10)
+
+/** UTC anniversary; Feb 29 clamps to Feb 28 in non-leap years. */
+export function forecastYearWindow(origin: string) {
+  const time=Date.parse(origin+'T00:00:00Z')
+  if(!Number.isFinite(time)||forecastDate(time)!==origin)throw new Error('Invalid forecast origin date.')
+  const day=new Date(time),month=day.getUTCMonth(),date=day.getUTCDate(),year=day.getUTCFullYear()
+  const anniversary=(offset:number)=>Date.UTC(year+offset,month,Math.min(date,new Date(Date.UTC(year+offset,month+1,0)).getUTCDate()))
+  return {origin:time,historyStart:anniversary(-1)+DAY,futureEnd:anniversary(1),futureDays:(anniversary(1)-time)/DAY}
+}
+
+/** Display one trailing calendar year; preserve every genuine future point. */
+export function trailingYearPoints(points: ChartPoint[]): ChartPoint[] {
+  const history=points.filter(p=>p.kind==='historical'||(p.kind==null&&p.historical!==null))
+  if(!history.length)return points
+  const window=forecastYearWindow(history[history.length-1].date)
+  return points.filter(p=>p.time>=window.historyStart)
+}
+
+/** Full display history permits explicit unknowns; model input validation stays separate. */
+export function fullForecastPoints(history: ForecastPoint[], future: ForecastPoint[], target: ForecastTarget): ChartPoint[] {
+  const seen = new Set<number>()
+  const convert = (rows: ForecastPoint[], kind: 'historical'|'forecast') => rows.map(row => {
+    const time = Date.parse(`${row.date}T00:00:00Z`), value = row[target]
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date) || !Number.isFinite(time) || forecastDate(time)!==row.date || seen.has(time) ||
+      (value !== null && (typeof value !== 'number' || !Number.isFinite(value))) || (kind==='forecast' && value===null)) {
+      throw new Error('Full forecast response contains duplicate/invalid dates or target values. No substitute values were drawn.')
+    }
+    seen.add(time)
+    return {date:row.date,time,historical:kind==='historical'?value!:null,forecast:kind==='forecast'?value!:null,kind}
+  }).sort((a,b)=>a.time-b.time)
+  const actual=convert(history,'historical'), predicted=convert(future,'forecast')
+  if (!actual.length) { if(predicted.length) throw new Error('Future predictions have no historical boundary.');return [] }
+  const start=actual[0].time,end=actual[actual.length-1].time
+  if ((end-start)/DAY+1>100000) throw new Error('Historical timeline exceeds the supported bound.')
+  const byDate=new Map(actual.map(p=>[p.time,p]))
+  const calendar:ChartPoint[]=[]
+  for(let time=start;time<=end;time+=DAY) calendar.push(byDate.get(time)||{time,date:forecastDate(time),historical:null,forecast:null,kind:'historical'})
+  if(predicted.some((p,i)=>p.time!==(i?predicted[i-1].time:end)+DAY)) throw new Error('Forecast dates do not follow the historical boundary at daily intervals.')
+  return [...calendar,...predicted]
+}
 export function forecastNumber(value: number, target: ForecastTarget, currency?: string | null) {
   return target === 'revenue' && currency
     ? new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)

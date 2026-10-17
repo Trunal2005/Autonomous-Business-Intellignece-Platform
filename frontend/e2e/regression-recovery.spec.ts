@@ -120,6 +120,8 @@ test('Admin folder import drives executive BI, real ML and export before isolate
   }
   const forecast=page.waitForResponse(r=>r.url().includes('/api/ml/forecast?')&&r.url().includes('target=orders'))
   await page.goto('/ml/metrics');expect((await(await forecast).json()).status).toBe('available')
+  await expect(page.getByTestId('forecast-chart')).toHaveAttribute('data-forecast-points','365')
+  await page.getByLabel('Forecast horizon').selectOption('30')
   await expect(page.getByTestId('forecast-chart')).toHaveAttribute('data-forecast-points','30')
   await page.goto('/reports')
   const exported=page.waitForResponse(r=>r.url().includes('report=kpis'))

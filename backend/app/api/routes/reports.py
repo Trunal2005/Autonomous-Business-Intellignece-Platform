@@ -2,7 +2,7 @@ import csv
 import io
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
@@ -13,6 +13,18 @@ from app.database.deps import get_db
 from app.services import users as user_service
 
 router = APIRouter()
+
+
+@router.get('/business-sales.docx', response_class=Response)
+def business_sales_document(f: Filters = Depends(analytics_filters), db: Session = Depends(get_db),
+                            user: dict = Depends(get_current_user)):
+    if not user_service.role_at_least(user, 'analyst'):
+        raise HTTPException(403, 'Requires analyst role to generate business reports.')
+    from app.services.business_report import generate
+    content = generate(db, f)
+    return Response(content, media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        headers={'Content-Disposition':'attachment; filename="business-sales-analysis.docx"',
+                 'X-Dataset-ID':db.info['dataset'].id, 'Cache-Control':'no-store'})
 
 # Business reports are shared BI functionality: admin and analyst alike.
 REPORT_ACCESS = {
