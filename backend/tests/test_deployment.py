@@ -14,6 +14,29 @@ PRODUCTION = {"ENV": "production", "DATABASE_URL": "postgresql+psycopg2://fixtur
               "ENABLE_LLM_ASSISTANT": False}
 
 
+def test_deployment_requirements_are_self_contained_and_preserve_reviewed_pins():
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    def requirements(filename):
+        lines = (ROOT / 'backend' / filename).read_text().splitlines()
+        return [Requirement(line) for line in lines if line.strip() and not line.startswith('#')]
+
+    deployed = requirements('requirements.txt')
+    reviewed = requirements('constraints-vercel.txt')
+    pins = lambda items: {canonicalize_name(item.name): str(item.specifier) for item in items}
+    assert len(deployed) == len(pins(deployed)), 'Duplicate deployment dependency'
+    assert pins(deployed) == pins(reviewed)
+    by_name = {canonicalize_name(item.name): item for item in deployed}
+    assert by_name['uvicorn'].extras == {'standard'}
+    assert by_name['python-jose'].extras == {'cryptography'}
+    assert by_name['passlib'].extras == {'bcrypt'}
+    for platform, uvloop, colorama in [('linux', True, False), ('win32', False, True)]:
+        environment = {'sys_platform': platform, 'platform_python_implementation': 'CPython'}
+        assert by_name['uvloop'].marker.evaluate(environment) == uvloop
+        assert by_name['colorama'].marker.evaluate(environment) == colorama
+
+
 @pytest.mark.parametrize('override', [
     {'DATABASE_URL': 'sqlite:///disposable.db'}, {'SECRET_KEY': 'dev-secret-change-me'},
     {'AUTH_REQUIRED': False}, {'CORS_ORIGINS': ['*']},

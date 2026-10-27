@@ -221,8 +221,12 @@ PostgreSQL integration require verification on the actual chosen services.
 Commit/push reviewed source, then redeploy the same initialized DB and private
 variables. Build/runtime never launches destructive ETL. Keep database backups
 and an independent Preview DB. Do not automatically import the developer SQLite
-file. Existing direct dependency versions are retained. `constraints-vercel.txt`
-locks the verified Linux Python 3.13 resolution without removing ML dependencies.
+file. Existing direct dependency versions are retained. `requirements.txt`
+contains self-contained direct and transitive pins for the
+verified Linux Python 3.13 resolution. The versions match the retained
+`constraints-vercel.txt` audit reference; no nested constraints include is used
+because Vercel Services dependency discovery fails to resolve it. Windows-only
+colorama and non-Windows CPython uvloop retain platform markers.
 The wheel-size audit is approximately 404.2 MiB expanded, excluding generated
 bytecode and deployment overhead; the actual assembled Vercel bundle still needs
 an authenticated hosted build check.
