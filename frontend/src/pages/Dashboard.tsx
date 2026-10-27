@@ -87,8 +87,6 @@ export default function Dashboard() {
           <KpiCard label="Total Revenue" value={fmtMoney(kpis.total_revenue)} hint="Sum of item prices" />
           <KpiCard label="Total Orders" value={kpis.total_orders.toLocaleString()} />
           <KpiCard label="Units Sold" value={kpis.items_sold.toLocaleString()} hint="Qualifying item rows; independent of distinct order count." />
-          <KpiCard label="Total Profit" value="Unavailable" hint="No validated cost/profit fields in this warehouse." />
-          <KpiCard label="Profit Margin" value="Unavailable" hint="Requires validated profit and revenue." />
           <KpiCard label="Unique Customers" value={kpis.unique_customers.toLocaleString()} />
           <KpiCard label="Products Sold" value={kpis.products_sold.toLocaleString()} />
           <KpiCard label="Active Sellers" value={kpis.active_sellers.toLocaleString()} />

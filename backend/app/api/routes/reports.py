@@ -11,6 +11,7 @@ from app.analytics.filters import Filters, analytics_filters
 from app.api.deps import get_current_user
 from app.database.deps import get_db
 from app.services import users as user_service
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -22,6 +23,8 @@ def business_sales_document(f: Filters = Depends(analytics_filters), db: Session
         raise HTTPException(403, 'Requires analyst role to generate business reports.')
     from app.services.business_report import generate
     content = generate(db, f)
+    if settings.VERCEL and len(content) > 4 * 1024 * 1024:
+        raise HTTPException(413, 'Hosted report exceeds the response budget. Narrow the date scope or generate it locally.')
     return Response(content, media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         headers={'Content-Disposition':'attachment; filename="business-sales-analysis.docx"',
                  'X-Dataset-ID':db.info['dataset'].id, 'Cache-Control':'no-store'})
@@ -124,11 +127,23 @@ def export_report(
                     writer.writerows([[_csv_value(v) for v in row] for row in batch])
                     yield buf.getvalue();buf.seek(0);buf.truncate(0)
             finally:cleanup()
+        if settings.VERCEL:
+            content = bytearray()
+            try:
+                for chunk in chunks():
+                    content.extend(chunk.encode('utf-8'))
+                    if len(content) > 4 * 1024 * 1024:
+                        raise HTTPException(413, 'Hosted CSV exceeds the response budget. Narrow the filters or export locally.')
+            finally:
+                cleanup()
+            return Response(bytes(content), media_type='text/csv', headers={'Content-Disposition':'attachment; filename="dataset_rows.csv"','X-Dataset-ID':ds.id})
         return StreamingResponse(chunks(),media_type='text/csv',background=BackgroundTask(cleanup),
             headers={'Content-Disposition':'attachment; filename="dataset_rows.csv"','X-Dataset-ID':ds.id})
 
     rows = _build_rows(report, db, f)
     csv_text = _to_csv(rows)
+    if settings.VERCEL and len(csv_text.encode('utf-8')) > 4 * 1024 * 1024:
+        raise HTTPException(413, 'Hosted CSV exceeds the response budget. Narrow the filters or export locally.')
 
     return StreamingResponse(
         iter([csv_text]),

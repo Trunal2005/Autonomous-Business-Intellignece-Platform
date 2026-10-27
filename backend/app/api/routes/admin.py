@@ -2,11 +2,13 @@ import platform
 import sys
 import time
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import inspect, text
+from sqlalchemy import func, inspect, select, text
 
 from app.api.deps import require_roles
+from app.analytics.filters import analytics_filters
 from app.core.config import settings
 from app.database.session import engine
 from app.database.deps import get_db
@@ -134,6 +136,36 @@ def _olist_dir() -> str:
 @router.get("/warehouse/status")
 def warehouse_status(_: dict = Depends(require_roles("admin")), ds=Depends(dataset_context), db=Depends(get_db)):
     """Warehouse administration: schema presence, row counts and load state."""
+    if ds.source_type == "bundle":
+        from uuid import UUID
+        from app.models.dataset import Dataset, DatasetBundleTable
+        from app.services.datasets import storage_table
+
+        # A bundle is a catalog of separate tables, not a physical parent table.
+        members = db.execute(select(DatasetBundleTable.relative_path, Dataset).join(
+            Dataset, Dataset.id == DatasetBundleTable.dataset_id).where(
+            DatasetBundleTable.bundle_id == ds.id).order_by(DatasetBundleTable.relative_path)).all()
+        existing = set(inspect(db.connection()).get_table_names())
+        counts = {path: child.row_count if child.status == "READY" and
+                  "dataset_" + UUID(child.id).hex in existing else None for path, child in members}
+        loaded = sum(value is not None for value in counts.values())
+        min_date = max_date = None
+        orders_id = ds.profile.get("relational_analysis", {}).get("roles", {}).get("orders")
+        for path, child in members:
+            if child.id != orders_id or counts[path] is None:
+                continue
+            column = next((c for c in child.profile.get("columns", []) if
+                           c["name"] == "order_purchase_timestamp" and c["dtype"] == "datetime"), None)
+            if column:
+                date = storage_table(child, db).c[column["storage"]]
+                min_date, max_date = db.execute(select(func.min(date), func.max(date))).one()
+        return {"dataset_id": ds.id, "dialect": db.get_bind().dialect.name,
+                "schema_tables": [path for path, count in counts.items() if count is not None],
+                "warehouse_tables": counts, "expected_tables": len(members), "loaded_tables": loaded,
+                "total_rows": sum(value for value in counts.values() if value is not None),
+                "complete": bool(members) and loaded == len(members), "source": ds.name,
+                "min_date": str(min_date)[:10] if min_date else None,
+                "max_date": str(max_date)[:10] if max_date else None}
     if ds.adapter == "tabular":
         from app.analytics.tabular import TabularSource
         source = TabularSource(db)
@@ -172,6 +204,17 @@ def warehouse_status(_: dict = Depends(require_roles("admin")), ds=Depends(datas
         "min_date": min_date,
         "max_date": max_date,
     }
+
+
+@router.get("/warehouse/queries")
+def warehouse_queries(
+    report: Literal["monthly_revenue", "orders_by_status", "revenue_by_category"] = "monthly_revenue",
+    _: dict = Depends(require_roles("admin")), ds=Depends(dataset_context),
+    db=Depends(get_db), f=Depends(analytics_filters),
+):
+    """Run one supported analytics report and return its actual SQL and results."""
+    from app.services.warehouse_queries import query_evidence
+    return query_evidence(db, ds, f, report)
 
 
 @router.get("/ml/status")

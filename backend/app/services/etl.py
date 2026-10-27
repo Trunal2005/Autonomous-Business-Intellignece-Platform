@@ -340,6 +340,9 @@ def transform(data: Dict[str, pd.DataFrame], report: ETLReport) -> Dict[str, pd.
 
 
 def load(tables: Dict[str, pd.DataFrame], report: ETLReport) -> None:
+    from app.core.config import settings
+    if settings.production:
+        raise RuntimeError("Destructive warehouse rebuild is disabled in production. Use a reviewed offline migration/import.")
     # Rebuild ONLY the warehouse tables (never the application's user tables)
     # so schema changes - e.g. new fact columns - are applied on re-runs.
     # Explicit order: children first for the drop, parents first for the create.

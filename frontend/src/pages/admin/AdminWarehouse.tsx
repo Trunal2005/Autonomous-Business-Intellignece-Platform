@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getWarehouseStatus, type WarehouseStatus } from '@/services/api'
+import WarehouseQueryPanel from '@/components/WarehouseQueryPanel'
 
 export default function AdminWarehouse() {
   const [wh, setWh] = useState<WarehouseStatus | null>(null)
@@ -16,6 +17,7 @@ export default function AdminWarehouse() {
 
   return (
     <div className="space-y-4">
+      <WarehouseQueryPanel />
       <div className="abi-panel border border-neutral-800 rounded-lg p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-medium">Warehouse</h2>

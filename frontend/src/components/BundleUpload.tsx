@@ -66,6 +66,7 @@ export default function BundleUpload({ saved }: { saved: (dataset: Dataset) => P
     finally { inFlight.current = false; setBusy(false); if (directory.current) directory.current.value = ''; if (zipInput.current) zipInput.current.value = '' }
   }
   return <section className="abi-panel border border-neutral-800 rounded-xl p-5 space-y-4" aria-label="Folder and ZIP upload">
+    {limits?.deployment_notice && <p role="note" className="text-sm text-amber-300">{limits.deployment_notice}</p>}
     <div><h2 className="font-semibold">Import a dataset folder</h2><p className="text-sm text-neutral-400 mt-1">One private bundle, separate CSV tables. Nested folders are supported; tables are never concatenated.</p></div>
     <div className="flex flex-wrap gap-3">
       <button disabled={busy || !folderSupported()} onClick={() => directory.current?.click()} className="px-4 py-2 bg-blue-600 rounded-lg disabled:opacity-50">Upload Folder</button>

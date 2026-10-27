@@ -81,3 +81,7 @@ backend/uploads/
 *.gguf
 **/.pytest_cache/
 **/__pycache__/
+
+# Generated deployment model bundle (private, supplied separately at build time).
+backend/model_assets/
+.vercel/

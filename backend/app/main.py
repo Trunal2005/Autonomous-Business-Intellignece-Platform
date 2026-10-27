@@ -4,13 +4,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.deps import auth_gate, require_bi_user, require_admin
 from app.api.routes import dashboard, ml, insights, analytics, auth, users, reports, admin, datasets
 from app.core.upload_budget import UploadBudgetMiddleware
+from app.core.config import settings
 
 app = FastAPI(title="Sem5 BI Platform", version="0.1.0")
 app.add_middleware(UploadBudgetMiddleware)
 
+if settings.production:
+    @app.exception_handler(Exception)
+    async def production_error(_request, exc):
+        import logging
+        from fastapi.responses import JSONResponse
+        logging.getLogger("abi").error("Request failed (%s); check configured services.", type(exc).__name__)
+        return JSONResponse({"detail": "Service operation failed. Check deployment health and retry."}, status_code=500)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,3 +45,19 @@ app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"], d
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def readiness():
+    from sqlalchemy import inspect, text
+    from fastapi.responses import JSONResponse
+    from app.database.session import engine
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+            required = {"app_user", "app_dataset", "app_dataset_selection", "app_dataset_bundle_table"}
+            if not required.issubset(inspect(connection).get_table_names()):
+                return JSONResponse({"status": "not_ready", "reason": "Database schema needs operator initialization."}, status_code=503)
+        return {"status": "ready", "database": engine.dialect.name}
+    except Exception:
+        return JSONResponse({"status": "not_ready", "reason": "Database unavailable; check private database configuration."}, status_code=503)

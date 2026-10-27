@@ -21,7 +21,11 @@ DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/sem5_bi
 
 The `psycopg2-binary` driver is already in `backend/requirements.txt`.
 
-## 3. Create the schema and load data
+## 3. Local reference warehouse only
+
+For production deployment, use [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)
+and the additive `app.services.initialize_production` command. Never run the
+following warehouse rebuild against production or private uploaded data.
 ```powershell
 cd backend
 python -m app.services.etl      # creates tables (SQLAlchemy) and loads Olist
@@ -45,5 +49,6 @@ python -m pytest -q
   — all natively supported by PostgreSQL.
 - **Case sensitivity**: PostgreSQL folds unquoted identifiers to lower case;
   table/column names here are already lower snake_case, so no changes needed.
-- **Idempotency**: re-running the ETL clears and reloads fact/dim tables, so it
-  is safe to repeat against an existing database.
+- **Idempotency**: the local reference ETL clears and reloads fact/dim tables;
+  it is destructive to existing warehouse contents and disabled in production.
+  Redeployment does not execute this ETL.

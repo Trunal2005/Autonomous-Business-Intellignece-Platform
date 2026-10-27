@@ -73,9 +73,10 @@ def key(name):
 
 def ensure_registry(db: Session):
     bind = db.get_bind()
-    Dataset.__table__.create(bind, checkfirst=True)
-    DatasetSelection.__table__.create(bind, checkfirst=True)
-    DatasetBundleTable.__table__.create(bind, checkfirst=True)
+    if not settings.production:
+        Dataset.__table__.create(bind, checkfirst=True)
+        DatasetSelection.__table__.create(bind, checkfirst=True)
+        DatasetBundleTable.__table__.create(bind, checkfirst=True)
     if not db.get(Dataset, REFERENCE_ID) and "fact_orders" in inspect(bind).get_table_names():
         from sqlalchemy import text
         n = db.scalar(text("SELECT COUNT(*) FROM fact_orders"))

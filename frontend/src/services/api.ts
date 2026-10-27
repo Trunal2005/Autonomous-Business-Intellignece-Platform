@@ -1,6 +1,6 @@
 import { expireSession, getRefreshToken, getToken, getSessionGeneration, refreshAccessToken, type Role } from './auth'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+import { API_BASE } from './base'
 let activeDatasetId: string | null = null
 let datasetVersion = 0
 const pendingGets = new Map<string, Promise<unknown>>()
@@ -70,7 +70,7 @@ export interface Dataset {
   capabilities: Record<string, { available: boolean; reason: string | null }>
   quality: { missing_values?: number; duplicate_rows?: number; warnings?: string[] }
 }
-export interface UploadLimits { max_bytes: number; max_rows: number; max_columns: number; max_cells: number; max_files: number; max_seconds: number; max_expanded_bytes?: number; bundle_max_rows?: number; bundle_max_cells?: number; bundle_max_seconds?: number; max_table_rows?: number; max_table_cells?: number }
+export interface UploadLimits { max_bytes: number; max_rows: number; max_columns: number; max_cells: number; max_files: number; max_seconds: number; max_expanded_bytes?: number; bundle_max_rows?: number; bundle_max_cells?: number; bundle_max_seconds?: number; max_table_rows?: number; max_table_cells?: number; deployment_notice?: string | null }
 export interface ImportJob { job_id: string; status: string; stage: string; completed_tables: number; total_tables: number; stored_rows: number; current_file?: string; error?: string; result?: Dataset }
 const pendingBundleKey = () => `sem5_pending_bundle:${localStorage.getItem('sem5_user')}`
 export function cancelBundleImport() {
@@ -435,7 +435,14 @@ export async function downloadBusinessReport(params: Record<string, string> = {}
   }
   const blob = await response.blob()
   ensureContext(context, 'Dataset or session changed; report discarded.')
-  const signature = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
+  const prefix = blob.slice(0, 4)
+  const buffer = typeof prefix.arrayBuffer === 'function' ? await prefix.arrayBuffer() : await new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as ArrayBuffer)
+    reader.onerror = () => reject(new Error('Cannot read the returned document package.'))
+    reader.readAsArrayBuffer(prefix)
+  })
+  const signature = new Uint8Array(buffer)
   ensureContext(context, 'Dataset or session changed; report discarded.')
   if (signature.length !== 4 || signature[0] !== 80 || signature[1] !== 75 || signature[2] !== 3 || signature[3] !== 4) {
     throw new Error('The returned document package is invalid. Retry the report.')
@@ -573,6 +580,18 @@ export interface WarehouseStatus {
 
 export function getWarehouseStatus() {
   return getJson<WarehouseStatus>('/api/admin/warehouse/status')
+}
+
+export type WarehouseQueryReport = 'monthly_revenue' | 'orders_by_status' | 'revenue_by_category'
+export interface WarehouseQueryEvidence {
+  dataset_id: string; dataset_name: string; report: WarehouseQueryReport; title: string
+  executed_at: string; elapsed_ms: number; status: 'executed' | 'not_applicable'; reason: string | null
+  queries: { sql: string; parameters: unknown; execution_ms: number }[]
+  rows: Record<string, unknown>[]
+  column_mappings: { table: string; source: string; columns: { stored: string; original: string }[] }[]
+}
+export function getWarehouseQueries(report: WarehouseQueryReport) {
+  return getJson<WarehouseQueryEvidence>(`/api/admin/warehouse/queries?report=${report}`)
 }
 
 export interface ArtifactInfo {

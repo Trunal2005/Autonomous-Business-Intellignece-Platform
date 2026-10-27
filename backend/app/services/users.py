@@ -49,6 +49,9 @@ def _migrate_legacy_roles(db) -> None:
 
 
 def _ensure_schema() -> None:
+    if settings.production:
+        # Production schema/admin initialization is an explicit operator command.
+        return
     Base.metadata.create_all(engine, tables=[User.__table__])
     with SessionLocal() as db:
         _migrate_legacy_roles(db)

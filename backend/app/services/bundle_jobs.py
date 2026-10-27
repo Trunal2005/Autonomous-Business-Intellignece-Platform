@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from app.services import dataset_bundles as bundles, datasets
+from app.core.config import settings
 
 POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix='bundle-import')
 GUARD = threading.Lock()
@@ -111,7 +112,7 @@ def submit(db,user,name,uploads,paths=None,zipped=False):
             with GUARD: JOBS[ident].update(changes,updated_at=time.time())
         update(total_tables=len(inputs))
         # Existing small-bundle API contract stays synchronous; large uploads return 202.
-        if payload<ASYNC_BYTES:
+        if payload<ASYNC_BYTES or settings.VERCEL:
             try:
                 result=bundles.ingest(db,user,name,inputs,expanded=zipped)
                 update(status='READY',result=result,completed_tables=len(result['tables']),stored_rows=result['row_count'])

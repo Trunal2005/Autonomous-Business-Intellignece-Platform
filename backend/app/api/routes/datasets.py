@@ -53,13 +53,15 @@ def list_datasets(db=Depends(get_db), user=Depends(require_bi_user)):
 
 @router.get("/upload-limits")
 def upload_limits(user=Depends(require_bi_user)):
+    from app.core.config import settings
     return {"max_bytes": service.MAX_BYTES, "max_rows": service.MAX_ROWS, "max_columns": service.MAX_COLUMNS,
             "max_cells": service.MAX_CELLS, "max_seconds": service.MAX_SECONDS, "max_files": bundles.MAX_FILES,
             "max_zip_ratio": bundles.MAX_RATIO, "relational_analysis": True,
             "max_expanded_bytes": bundles.MAX_EXPANDED_BYTES, "bundle_max_rows": bundles.MAX_ROWS,
             "bundle_max_cells": bundles.MAX_CELLS, "bundle_max_seconds": bundles.MAX_SECONDS,
             "max_table_rows": bundles.MAX_TABLE_ROWS, "max_table_cells": bundles.MAX_TABLE_CELLS,
-            "concurrent_bundle_imports": 1}
+            "concurrent_bundle_imports": 1,
+            "deployment_notice": "Hosted uploads: 3 MiB total payload, bounded synchronous processing; large folder/ZIP imports remain available locally. Data persists in PostgreSQL." if settings.VERCEL else None}
 
 
 @router.post("/bundles/upload", status_code=201)

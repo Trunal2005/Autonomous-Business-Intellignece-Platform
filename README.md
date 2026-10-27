@@ -51,7 +51,17 @@ not establish a GitHub clean-clone test of this checkpoint.
 8. Run the API: `cd backend && python -m uvicorn app.main:app --reload`
 9. Run the UI: `cd frontend && npm run dev`
 
-## Testing
+## Vercel deployment
+
+See [the repository-specific Vercel deployment guide](docs/VERCEL_DEPLOYMENT.md).
+The root `vercel.json` uses current Services configuration for Vite and FastAPI
+on one origin. Production requires separately provisioned PostgreSQL, private
+authentication configuration and a checksum-pinned serving-model bundle.
+Hosted uploads are deliberately bounded to 3 MiB and finish synchronously;
+the existing larger local folder/ZIP workflow remains available.
+Repository configuration alone is not evidence of a verified public deployment.
+
+## Test commands
 ```powershell
 cd backend; python -m pytest -q          # Isolated API/integration tests; optional reference fixtures
 cd ml;      python -m pytest -q          # ML pipeline tests

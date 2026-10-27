@@ -7,6 +7,7 @@ joblib artifacts to serve predictions. All numbers come from real training runs.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -24,7 +25,10 @@ FEATURE_GROUPS: dict[str, list[str]] = {
 
 def models_dir() -> Path:
     env = os.getenv("ML_MODELS_DIR")
-    return Path(env) if env else REPO_ROOT / "ml" / "models"
+    if env:
+        return Path(env)
+    from app.core.config import settings
+    return REPO_ROOT / "backend" / "model_assets" if settings.VERCEL else REPO_ROOT / "ml" / "models"
 
 
 def processed_dir() -> Path:
@@ -121,6 +125,12 @@ def _load_artifact(name: str):
         raise ValueError('Artifact must be a trusted model-directory filename.')
     if not path.exists():
         raise FileNotFoundError(f"artifact missing: {path}")
+    from app.core.config import settings
+    if settings.VERCEL:
+        manifest = json.loads((models_dir() / 'manifest.json').read_text())
+        for file in (path, models_dir() / f'{name}.metadata.json'):
+            if hashlib.sha256(file.read_bytes()).hexdigest() != manifest['sha256'].get(file.name):
+                raise ValueError('Deployed artifact/metadata checksum mismatch; model loading refused.')
     return joblib.load(path)
 
 

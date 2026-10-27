@@ -4,7 +4,7 @@ from ipaddress import ip_address
 from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 load_dotenv()
@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     REFRESH_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", "10080"))
     ENV: str = os.getenv("ENV", "dev")
+    VERCEL: bool = False
+    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:5175"]
 
     # Auth / RBAC. Two roles only: admin and analyst.
     # Defaults to true: every protected router rejects anonymous callers with 401.
@@ -69,6 +71,40 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama")
     LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "20"))
+
+    @property
+    def production(self) -> bool:
+        return self.VERCEL or self.ENV.lower() in {"production", "prod"}
+
+    @model_validator(mode="after")
+    def production_contract(self):
+        if not self.production:
+            return self
+        if not self.AUTH_REQUIRED:
+            raise ValueError("Production requires AUTH_REQUIRED=true.")
+        if len(self.SECRET_KEY) < 32 or self.SECRET_KEY in {"dev-secret-change-me", "change_this_in_local_dev"}:
+            raise ValueError("Production requires a private SECRET_KEY of at least 32 characters.")
+        if not self.DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://")):
+            raise ValueError("Production requires persistent PostgreSQL DATABASE_URL; SQLite is local-only.")
+        if "*" in self.CORS_ORIGINS:
+            raise ValueError("Credentialed CORS requires explicit origins.")
+        if "CORS_ORIGINS" not in self.model_fields_set and "CORS_ORIGINS" not in os.environ:
+            self.CORS_ORIGINS = []
+        if self.VERCEL:
+            if self.ENABLE_LLM_ASSISTANT:
+                raise ValueError("Vercel cannot access personal localhost Ollama; set ENABLE_LLM_ASSISTANT=false.")
+            self.DATASET_MAX_BYTES = min(self.DATASET_MAX_BYTES, 3 * 1024 * 1024)
+            self.DATASET_MAX_SPREADSHEET_EXPANDED_BYTES = min(self.DATASET_MAX_SPREADSHEET_EXPANDED_BYTES, 16 * 1024 * 1024)
+            self.DATASET_MAX_ROWS = min(self.DATASET_MAX_ROWS, 50000)
+            self.DATASET_MAX_CELLS = min(self.DATASET_MAX_CELLS, 500000)
+            self.DATASET_MAX_SECONDS = min(self.DATASET_MAX_SECONDS, 60)
+            self.BUNDLE_MAX_EXPANDED_BYTES = min(self.BUNDLE_MAX_EXPANDED_BYTES, 16 * 1024 * 1024)
+            self.BUNDLE_MAX_TABLE_ROWS = min(self.BUNDLE_MAX_TABLE_ROWS, 50000)
+            self.BUNDLE_MAX_TABLE_CELLS = min(self.BUNDLE_MAX_TABLE_CELLS, 500000)
+            self.BUNDLE_MAX_ROWS = min(self.BUNDLE_MAX_ROWS, 50000)
+            self.BUNDLE_MAX_CELLS = min(self.BUNDLE_MAX_CELLS, 500000)
+            self.BUNDLE_MAX_SECONDS = min(self.BUNDLE_MAX_SECONDS, 60)
+        return self
 
     @field_validator("LLM_PROVIDER")
     @classmethod
@@ -92,6 +128,8 @@ class Settings(BaseSettings):
     def stable_default_database(cls, value):
         # The documented dev database must not depend on the launch directory.
         # Preserve explicit custom databases, including disposable test storage.
+        if isinstance(value, str) and value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+psycopg2://", 1)
         if value in (None, "", "sqlite:///./sem5.db", "sqlite:///sem5.db"):
             return DEFAULT_DATABASE_URL
         return value

@@ -1,14 +1,25 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.pool import NullPool
+from sqlalchemy.engine import make_url
 
 from app.core.config import settings
 
 IS_SQLITE = settings.DATABASE_URL.startswith("sqlite")
 
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False} if IS_SQLITE else {},
-)
+def engine_options():
+    if IS_SQLITE:
+        return {"connect_args": {"check_same_thread": False}}
+    options = {"pool_pre_ping": True, "hide_parameters": settings.production}
+    if settings.production:
+        sslmode = make_url(settings.DATABASE_URL).query.get("sslmode", "require")
+        if sslmode not in {"require", "verify-ca", "verify-full"}:
+            raise ValueError("Production PostgreSQL requires TLS (sslmode=require or verify-full).")
+        options.update(poolclass=NullPool, connect_args={"sslmode": sslmode, "connect_timeout": 10})
+    return options
+
+
+engine = create_engine(settings.DATABASE_URL, **engine_options())
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

@@ -1,7 +1,7 @@
 import { PageHeader } from '@/components/ui/Workspace'
 import { useEffect, useState } from 'react'
 import { useDataset } from '@/hooks/useDataset'
-import { deleteDataset, getDatasetPreview, uploadDataset, updateDatasetSchema, type Dataset } from '@/services/api'
+import { deleteDataset, getDatasetPreview, getUploadLimits, uploadDataset, updateDatasetSchema, type Dataset, type UploadLimits } from '@/services/api'
 import BundleUpload from '@/components/BundleUpload'
 import { Link } from 'react-router-dom'
 
@@ -61,6 +61,8 @@ function SchemaReview({ dataset, saved }: { dataset: Dataset; saved: () => Promi
 }
 
 export default function Datasets() {
+  const [limits, setLimits] = useState<UploadLimits | null>(null)
+  useEffect(() => { let current = true; getUploadLimits().then(value => { if (current) setLimits(value) }).catch(() => {}); return () => { current = false } }, [])
   const { datasets, active, reload, select } = useDataset()
   const [file, setFile] = useState<File | null>(null)
   const [name, setName] = useState('')
@@ -70,6 +72,7 @@ export default function Datasets() {
   const inspected = datasets.flatMap(d => [d, ...(d.tables || [])]).find(d => d.dataset_id === inspectId)
   const upload = async () => {
     if (!file) return
+    if (limits && file.size > limits.max_bytes) { setError(`File exceeds the server upload limit (${(limits.max_bytes / 1024 / 1024).toFixed(2)} MiB). Use a smaller file or import locally.`); return }
     setBusy(true); setError(null)
     try {
       const ds = await uploadDataset(file, name)
